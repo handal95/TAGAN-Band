@@ -41,6 +41,8 @@ class Dashboard:
     def init_figure(self):
         fig, ax = plt.subplots(figsize=(20, 6), facecolor="lightgray")
         fig.suptitle(self.dataset.title, fontsize=25)
+        fig.set_facecolor('lightgray')
+
         ax.set_xlabel("Time")
         ax.set_ylabel("Value")
 
@@ -90,7 +92,6 @@ class Dashboard:
         x = x[0].detach().numpy().ravel()
         y = y[0].detach().numpy().ravel()
         label = label[0].detach().numpy().ravel()
-        # print(label)
         
         def isnormal():
             return not (
@@ -129,8 +130,9 @@ class Dashboard:
 
         fig, ax = self.fig, self.ax
         ax.clear()
-        # ax.grid()
-        fig.set_facecolor('lightgray')
+        ax.grid()
+        min_scope = max(self.sequence, self.data.size - self.scope + 1)
+
         try:
             length = len(self.pred)
 
@@ -138,34 +140,35 @@ class Dashboard:
                 self.detects.append(('m', len(self.data) - 1, None, 'black'))
             elif True in np.isin(label[cond], [1]):
                 self.detects.append(('m', len(self.data) - 1, self.data[-cond], 'red'))
+
             if self.area_down3[-1] > self.data[-1] or self.area_up3[-1] < self.data[-1]:
                 self.detects.append(('a', len(self.data) - 1, self.data[-1], 'red'))            
             elif self.area_down2[-1] > self.data[-1] or self.area_up2[-1] < self.data[-1]:
-                self.detects.append(('a',len(self.data) - 1, self.data[-1], 'black'))
+                self.detects.append(('a', len(self.data) - 1, self.data[-1], 'black'))
             
             for p, x, y, c in self.detects:
-                if p == 'm':
-                    plt.axvline(x, 0, 1, color=c, linewidth=4, alpha=0.2)
-                elif p == 'a':
-                    plt.scatter(x, y, color=c, s=10)
+                if x >= 0:
+                    if p == 'm':
+                        plt.axvline(x - min_scope, 0, 1, color=c, linewidth=4, alpha=0.2)
+                    elif p == 'a':
+                        plt.scatter(x - min_scope, y, color=c, s=10)
 
-            plt.axvspan(length - self.sequence, length - self.sequence + cond, facecolor='green' if isnormal() else 'red', alpha=0.1)
-            plt.axvspan(length - self.sequence + cond, length, facecolor='lightblue' if isnormal() else 'pink', alpha=0.5)
+            pivot = length - self.sequence - min_scope
+            plt.axvspan(pivot, pivot + cond, facecolor='green' if isnormal() else 'red', alpha=0.3)
+            plt.axvspan(pivot + cond, length - min_scope, facecolor='lightblue' if isnormal() else 'pink', alpha=0.7)
 
-            length = np.arange(len(self.area_up1))
-            ax.fill_between(length, self.area_down3, self.area_up3, color='red', alpha=0.1)
-            ax.fill_between(length, self.area_down2, self.area_up2, color='blue', alpha=0.2)
-            ax.fill_between(length, self.area_down1, self.area_up1, color='blue', alpha=0.3)
-            # ax.plot(self.median, "k-", linewidth=2, alpha=0.6, label="data")
-            # ax.plot(self.mean, "k-", linewidth=2, alpha=0.6, label="data")
+            length = np.arange(len(self.area_up1[min_scope:]))
+            ax.fill_between(length, self.area_down3[min_scope:], self.area_up3[min_scope:], color='red', alpha=0.1)
+            ax.fill_between(length, self.area_down2[min_scope:], self.area_up2[min_scope:], color='blue', alpha=0.2)
+            ax.fill_between(length, self.area_down1[min_scope:], self.area_up1[min_scope:], color='blue', alpha=0.3)
 
-            # ax.plot(self.origin, "k-", linewidth=4, alpha=1, label="data")
-            ax.plot(self.data, "r-", linewidth=1, alpha=1, label="data")
-            ax.plot(self.pred, "b-", linewidth=3, alpha=0.2, label="pred")
+            ax.plot(self.origin[min_scope:], "k-", linewidth=1, alpha=1, label="origin")
+            ax.plot(self.data[min_scope:], "r-", linewidth=1, alpha=1, label="data")
+            ax.plot(self.pred[min_scope:], "b-", linewidth=3, alpha=0.2, label="pred")
+            ax.plot(self.median[min_scope:], "k-", linewidth=3, alpha=0.2, label="median")
 
-
-            xtick = np.arange(0, self.scope * 2, 12)
-            values = self.time[0:self.scope * 2:12]
+            xtick = np.arange(0, self.scope, 12)
+            values = self.time[min_scope:min_scope + self.scope:12]
 
             plt.ylim(self.dataset.min, self.dataset.max)
             plt.xticks(xtick, values, rotation=30)
@@ -228,10 +231,8 @@ class Dashboard:
             # print(f"Pred length : {len(self.pred5)}")
             # ax.vlines(x=min_axvln, ymin=pred[4:].min(), ymax=pred[4:].max(), linewidth=3)
             ax.plot(self.data[min_scope:], "r-", alpha=0.6, linewidth=4, label="Actual Data")
-            # ax.plot(self.pred2[min_scope:], alpha=0.4, label="Pred 3")
-            # ax.plot(self.pred3[min_scope:], alpha=0.4, label="Pred 6")
+            ax.plot(self.pred[min_scope:], "k-", alpha=0.6, linewidth=4, label="Pred Data")
             # ax.plot(self.pred4[min_scope:], alpha=0.4, label="Pred 9")
-            # ax.plot(self.pred5[min_scope:], alpha=0.4, label="Pred 11")
             ax.plot(self.area_upper[min_scope:], "b-", linewidth=2, alpha=0.6, label="Upper")
             ax.plot(self.area_lower[min_scope:], "b-", linewidth=2, alpha=0.6, label="Lower")
             ax.legend()

@@ -6,16 +6,20 @@ import json
 import torch
 import numpy as np
 import pandas as pd
-from timeseries.logger import Logger
+from logger import Logger
 
 logger = Logger(__file__)
 
+MISSING = -1.0
+ANOMALY = 1.0
+
 class TimeseriesDataset:
-    def __init__(self, config, device):
+    def __init__(self, config, device, temp=False):
         # Load Data
         logger.info("Loading Dataset")
         self.device = device
-        self.init_config(config)
+        self.init_config(config, temp)
+        self.temp = temp
 
         # Dataset
         data, label = self.load_data()
@@ -27,7 +31,9 @@ class TimeseriesDataset:
         
         self.data_len = len(self.data)
         
-    def init_config(self, config):
+        self.replace = None
+        
+    def init_config(self, config, temp):
         self.title = config["data"]
         self.label = config["anomaly"]
         self.workers = config["workers"]
@@ -39,7 +45,10 @@ class TimeseriesDataset:
         self.batch_size = config["batch_size"]
         self.hidden_dim = config["hidden_dim"]
         
-        self.data_path = os.path.join(config["path"], config["data"])
+        if temp is True:
+            self.data_path = os.path.join(config["path"], "ambient_temperature_system_failure_origin.csv")
+        else:
+            self.data_path = os.path.join(config["path"], config["data"])
         self.anomaly_path = os.path.join(config["path"], config["anomaly"])
         
         
@@ -51,7 +60,6 @@ class TimeseriesDataset:
         data = data.set_index(self.index)
 
         data = data.interpolate(method='time')
-        data.to_csv('hi2.csv')
 
         return data, label
     
@@ -86,8 +94,9 @@ class TimeseriesDataset:
 
         data = data.set_index(self.index).sort_index().reset_index()
 
-        with open(self.anomaly_path, mode="w") as f:
-            json.dump(json_data, f)
+        if self.temp is False:
+            with open(self.anomaly_path, mode="w") as f:
+                json.dump(json_data, f)
 
         filled_length = len(data) - length
         logger.info(f"Filling Time Gap : Filled records : {filled_length} : timegap : {timegap}")
@@ -104,15 +113,14 @@ class TimeseriesDataset:
             ano_end = pd.to_datetime(ano_span[1])
             for idx in data.index:
                 if data.loc[idx, self.index] >= ano_start and data.loc[idx, self.index] <= ano_end:
-                    label[idx] = 1.0
+                    label[idx] = ANOMALY
 
         for miss_span in json_data["missings"]:
-            # print(miss_span)
             nan_start = pd.to_datetime(miss_span[0])
             nan_end = pd.to_datetime(miss_span[1])
             for idx in data.index:
                 if data.loc[idx, self.index] >= nan_start and data.loc[idx, self.index] <= nan_end:
-                    label[idx] = -1.0
+                    label[idx] = MISSING
 
         label = pd.DataFrame({self.index : data[self.index], "value": label})
         label = label.set_index(self.index)
@@ -181,15 +189,41 @@ class TimeseriesDataset:
         
         return y
     
-    def fill_missing_value(self, x, y, label, idx):
-        if (True in np.isin(label[:, -1], [1]) or True in np.isin(label[:, -1], [-1])):
-            y = y.cpu().detach().numpy()
-            m = np.mean(y[:, 0], axis=1)
+    def fill_missing_value(self, x, y, label, idx, cond):
+        
+        def isin(label, latest=False):
+            label_ = label[:, -1] if latest is True else label
+            return (True in np.isin(label_, [MISSING]) )#or True in np.isin(label_, [ANOMALY]))
+                    
+        if isin(label):
+            print(
+                f"{self.time[idx]}: "
+                f"{self.denormalize(x.cpu().detach().numpy().ravel())}  " 
+                f"{label.cpu().detach().numpy().ravel()}")
 
-            for i in range(0, 12):
-                tensor = torch.Tensor(y[:, -1])
-                if label[:, i, :] is not 0.0:
-                    self.data[idx + i + 1, 11-i, :] = tensor
-            # pass
-            
+            if self.replace is None:
+                self.replace = x
+            else:
+                self.replace[:, :-1] = self.replace[:, 1:].clone()
+
+            if isin(label, latest=True):
+                y = y.cpu().detach().numpy()
+                n = (np.median(y[:, cond:-1], axis=0) + y[:, -1]) / 2
+                self.replace[:, -1:] = torch.Tensor(n[-1])
+                print(
+                    f"{self.time[idx]}: "
+                    f"{self.denormalize(y.ravel())}  " 
+                    f"{self.denormalize(n.ravel())}  " 
+                )
+            else:
+                self.replace[:, -1:] = x[:, -1:, :]
+
+            x[0] = self.replace.to(self.device)
+
+        else:
+            # # TODO: Temp Flag
+            if self.replace is not None:
+                self.replace = None
+
+
         return x

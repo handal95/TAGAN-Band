@@ -9,20 +9,21 @@ from torch.autograd import grad as torch_grad
 import numpy as np
 import pandas as pd
 
-from timeseries.args import init_arguments
-from timeseries.logger import Logger
-from timeseries.bandgan import BandGAN
-from timeseries.datasets import TimeseriesDataset
-from timeseries.layers.LSTMGAN import LSTMGenerator, LSTMDiscriminator
+from logger import Logger
+from bandgan import BandGAN
+from datasets import TimeseriesDataset
+from layers.LSTMGAN import LSTMGenerator, LSTMDiscriminator
 
+from utils.args import init_arguments
 from utils.loss import GANLoss
 from utils.visualize import Dashboard
 
 
 logger = Logger(__file__)
-
+MISSING = -1.0
+ANOMALY = 1.0
 torch.manual_seed(31)
-
+np.set_printoptions(linewidth=np.inf)
 
 class BandGAN:
     """
@@ -36,7 +37,7 @@ class BandGAN:
 
         # Model option
         self.dataset = TimeseriesDataset(config["dataset"], self.device)
-        self.origin = TimeseriesDataset(config["dataset"], self.device)
+        self.origin = TimeseriesDataset(config["dataset"], self.device, temp=True)
         self.dataloader = self.init_dataloader(self.dataset)
         (self.netG, self.netD) = self.init_model()
 
@@ -112,7 +113,6 @@ class BandGAN:
         dataloader = torch.utils.data.DataLoader(
             dataset,
             batch_size=dataset.batch_size,
-            # shuffle=dataset.shuffle,
             num_workers=dataset.workers,
         )
         return dataloader
@@ -364,12 +364,16 @@ class BandGAN:
 
             # Train with Fake Data z
             y = self.dataset.get_sample(x, self.netG, shape, self.cond)
-            x = self.dataset.fill_missing_value(x, y, label, i)
+            x = self.dataset.fill_missing_value(x, y, label, i, self.cond)
 
             Dx = self.netD(x)
-            errD_real = self.criterion_adv(Dx, target_is_real=not(True in np.isin(label, [1]) or True in np.isin(label, [-1])))
+            target_flag = not(True in np.isin(label[:, -1], [ANOMALY]))
+            if target_flag is False:
+                print(i)
+            errD_real = self.criterion_adv(Dx, target_is_real=target_flag)
             errD_real.backward(retain_graph=True)
 
+            # y = self.dataset.get_sample(x, self.netG, shape, self.cond)
             Dy = self.netD(y)
             errD_fake = self.criterion_adv(Dy, target_is_real=False)
             errD_fake.backward(retain_graph=True)
@@ -404,7 +408,6 @@ class BandGAN:
             self.losses["GP"] += gradients_penalty
 
             if self.print_verbose > 0:
-                print(self.print_verbose)
                 print(
                     f"[{i + 1:4d}/{len(self.dataloader):4d}] "
                     f"D   {self.losses['D']/(i + 1):.4f} "
@@ -415,13 +418,6 @@ class BandGAN:
                     end="\r",
                 )
             
-            
-            # dashboard._visualize(
-            #     self.dataset.time[i],
-            #     self.dataset.denormalize(x.cpu()),
-            #     self.dataset.denormalize(y.cpu()),
-            # )
-            
             dashboard.visualize(
                 self.origin[i][0].cpu(),
                 x.cpu(),
@@ -430,8 +426,6 @@ class BandGAN:
                 cond=self.cond,
                 normalize=True,
             )
-
-        pass
         
 
 if __name__ == "__main__":
