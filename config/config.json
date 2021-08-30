@@ -1,0 +1,51 @@
+{
+    "dataset": {
+        "path": "data\\",
+        "data": "ambient_temperature_system_failure.csv",
+        "anomaly": "ambient_temperature_system_failure.json",
+        "index": "timestamp",
+
+        "workers": 2,
+        "shuffle": false,
+        "stride": 1,
+
+        "batch_size": 1,
+        "seq_len": 12,
+        "hidden_dim": 256
+    },
+    "model": {
+        "path": "pretrained/",
+        "save": false,
+        "load": true,
+        "interval": 100,
+        "tag": "10000"
+    },    
+    "train": {
+        "epochs": {
+            "base": 0,
+            "iter": 1000,
+            "critic": 5
+        },
+        "learning_rate": {
+            "base": 0.0002,
+            "gammaD": 1.0,
+            "gammaG": 0.5
+        },
+        "wgan":{
+            "cond": 6,
+            "gp_weight": 1
+        } 
+    },
+    "print": {
+        "verbose": 0,
+        "newline": 100
+    },
+    "result": {
+        "bands_sigma": {
+            "safety": 0.5,
+            "normal": 1.0,
+            "notion": 2.0,
+            "danger": 3.0
+        }
+    }
+}
