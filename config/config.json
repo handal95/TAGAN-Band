@@ -33,12 +33,17 @@
             "pivot": 6,
             "gp_weight": 1,
             "l1_gamma": 1,
-            "l2_gamma": 1
-        } 
+            "l2_gamma": 1,
+            "sigmas": {
+                "inner": 0.5,
+                "normal": 1.0,
+                "warning": 2.0
+            }
+        }
     },
     "print": {
         "verbose": 1,
         "newline": 100
     },
-    "visual": true
+    "visual": false
 }

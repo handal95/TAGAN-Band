@@ -3,6 +3,7 @@ import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import pandas as pd
 
 from models.bander import TAGAN_Bander
 from models.LSTMGAN import LSTMGenerator, LSTMDiscriminator
@@ -101,17 +102,6 @@ class TAGANBand:
         # Visual option
         self.visual = config["visual"]
 
-        # TODO : Result option
-        # For Outlier detection range customization options
-        # Current - default option ( 0.5 sigma / 1.0 sigma / 2.0 sigma )
-
-        # self.sigma = {
-        #     "safety": result_cfg["bands_sigma"]["safety"],
-        #     "normal": result_cfg["bands_sigma"]["normal"],
-        #     "notion": result_cfg["bands_sigma"]["notion"],
-        #     "danger": result_cfg["bands_sigma"]["danger"],
-        # }
-
         return config
 
     def init_dataloader(self, dataset):
@@ -205,12 +195,42 @@ class TAGANBand:
             self.losses["GP"] += err_gp
 
             if self.print_verbose > 0:
-                print(self._loss_message(i), end="\r")
+                print(f"{self._loss_message(i)}", end="\r")
 
             (x, y, label, bands, detects) = self.bander.process(x, y, label)
-            dashboard.visualize(x, y, label, bands, detects, pivot=self.pivot)
+            
+            if self.visual:
+                dashboard.visualize(x, y, label, bands, detects, pivot=self.pivot)
 
         logger.info(f"\n{self._loss_message()}")
+        
+    def get_labels(self, text=False):
+        origin = self.dataset.origin
+        pred = self.bander.pred
+        median = self.bander.bands["median"]
+        pred[:len(median)] = median
+        labels = self.bander.label
+        
+        output_path = f"output_{self.dataset.title}.csv"
+        
+        if text:
+            text_label = list()
+            LABELS = {
+                -1.0: "Imputed",
+                0.0: "Normal",
+                1.0: "Labeled-Anomal",
+                2.0: "Detected-Warning",
+                3.0: "Detected-Outlier"
+            }
+
+            for label in labels:
+                text_label.append(LABELS[label])
+            labels = text_label
+
+        label_info = pd.DataFrame({"value": origin, "pred": pred, "label": labels})
+        label_info.to_csv(output_path)
+
+        logger.info(f"Labeling File is saved to {output_path}")
 
     def _runtime(self, epoch, time):
         mean_time = time / (epoch - self.base_epochs)

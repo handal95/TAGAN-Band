@@ -34,8 +34,12 @@ train:
         gp_weight: 1
         l1_gamma: 10
         l2_gamma: 10
+        sigmas:
+            inner: 0.5
+            normal: 1.0
+            warning: 2.0
 print:
     verbose: 1
     newline: 100
 
-visual: True
+visual: False

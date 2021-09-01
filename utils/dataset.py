@@ -24,6 +24,8 @@ class TimeseriesDataset:
         # Dataset
         data, label = self.load_data()
 
+        self.index = data.index
+        self.origin = data.value
         self.time = self.store_times(data)
         self.data = self.store_values(data, normalize=True)
         self.label = self.store_values(label, normalize=False)
@@ -48,7 +50,6 @@ class TimeseriesDataset:
         self.label_path = os.path.join(config["path"], f"{self.title}.json")
 
     def load_data(self):
-
         _path_checker(self.data_path, force=True)
 
         data = pd.read_csv(self.data_path)
