@@ -3,15 +3,15 @@ import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import numpy as np
 
+from models.bander import TAGAN_Bander
 from models.LSTMGAN import LSTMGenerator, LSTMDiscriminator
 
 from utils.args import load_yaml
 from utils.loss import GANLoss
 from utils.logger import Logger
 from utils.device import init_device
-from utils.visualize import Dashboard
+from utils.dashboard import Dashboard
 from utils.dataset import TimeseriesDataset
 
 logger = Logger(__file__)
@@ -36,17 +36,18 @@ class TAGANBand:
         # Config option
         config = self.set_config(config=config)
 
-        # Model option
+        # Dataset option
         self.dataset = TimeseriesDataset(config=self.dataset_config)
         self.dataloader = self.init_dataloader(self.dataset)
+
+        # Model option
+        self.bander = TAGAN_Bander(self.dataset, config=self.bander_config)
         (self.netG, self.netD) = self.init_model()
-
-        self.batch_size = self.dataset.batch_size
-        self.seq_len = self.dataset.seq_len
-        self.in_dim = self.dataset.n_feature
-        self.shape = (self.batch_size, self.seq_len, self.in_dim)
-
         self.losses = {"G": 0.0, "D": 0.0, "l1": 0.0, "l2": 0.0, "GP": 0.0}
+
+        # Data option
+        self.shape = self.dataset.shape
+        self.in_dim = self.dataset.in_dim
 
     def set_config(self, config=None):
         """
@@ -87,10 +88,11 @@ class TAGANBand:
         self.iter_epochs = train_cfg["epochs"]["iter"]
         self.iter_critic = train_cfg["epochs"]["critic"]
 
-        self.gp_weight = train_cfg["wgan"]["gp_weight"]
-        self.pivot = train_cfg["wgan"]["pivot"]
-        self.l1_gamma = train_cfg["wgan"]["l1_gamma"]
-        self.l2_gamma = train_cfg["wgan"]["l2_gamma"]
+        self.bander_config = train_cfg["bander"]
+        self.pivot = train_cfg["bander"]["pivot"]
+        self.gp_weight = train_cfg["bander"]["gp_weight"]
+        self.l1_gamma = train_cfg["bander"]["l1_gamma"]
+        self.l2_gamma = train_cfg["bander"]["l2_gamma"]
 
         # Print option
         self.print_verbose = print_cfg["verbose"]
@@ -136,7 +138,7 @@ class TAGANBand:
 
     def load_model(self, load_option=False):
         hidden_dim = self.dataset.hidden_dim
-        in_dim = self.dataset.n_feature
+        in_dim = self.dataset.in_dim
         device = self.device
 
         if load_option is True:
@@ -158,14 +160,6 @@ class TAGANBand:
         netD = LSTMDiscriminator(in_dim, hidden_dim=hidden_dim, device=device)
         return (netG, netD)
 
-    def _runtime(self, epoch, time):
-        mean_time = time / (epoch - self.base_epochs)
-        left_epoch = self.iter_epochs - epoch
-        done_time = time + mean_time * left_epoch
-
-        runtime = f"{time:4.2f} / {done_time:4.2f} sec "
-        return runtime
-
     def run(self):
         logger.info("Evaluate the model")
 
@@ -176,18 +170,17 @@ class TAGANBand:
             self.optimizerG.zero_grad()
 
             x = data.to(self.device)
-            shape = (x.size(0), x.size(1), self.in_dim)
 
             # Train with Fake Data z
-            y = self.dataset.get_sample(x, self.netG, shape, self.pivot)
-            x = self.dataset.impute_missing_value(x, y, label, self.pivot)
+            y = self.bander.get_sample(x, self.netG)
+            x = self.bander.impute_missing_value(x, y, label, self.pivot)
 
             Dx = self.netD(x)
-            imputate = (self.dataset.check_missing(label, latest=True))
+            imputate = self.bander.check_missing(label, latest=True)
             errD_real = self.criterion_adv(Dx, target_is_real=True, imputate=imputate)
             errD_real.backward(retain_graph=True)
 
-            y = self.dataset.get_sample(x, self.netG, shape, self.pivot)
+            y = self.bander.get_sample(x, self.netG)
             Gy = self.netD(y)
             errD_fake = self.criterion_adv(Gy, target_is_real=False)
             errD_fake.backward(retain_graph=True)
@@ -196,44 +189,55 @@ class TAGANBand:
             self.optimizerD.step()
 
             Dy = self.netD(y)
-            errG_ = self.criterion_adv(Dy, target_is_real=False)
-            errl1 = self.criterion_l1n(y, x) * self.l1_gamma
-            errl2 = self.criterion_l2n(y, x) * self.l2_gamma
-            gradients_penalty = self.gp_weight * self._grad_penalty(x, y)
+            err_G = self.criterion_adv(Dy, target_is_real=False)
+            err_l1 = self.l1_gamma * self.criterion_l1n(y, x)
+            err_l2 = self.l2_gamma * self.criterion_l2n(y, x)
+            err_gp = self.gp_weight * self._grad_penalty(y, x)
 
-            errG = errG_ + errl1 + errl2 + gradients_penalty
+            errG = err_G + err_l1 + err_l2 + err_gp
             errG.backward(retain_graph=True)
             self.optimizerG.step()
 
-            self.losses["G"] += errG_
+            self.losses["G"] += err_G
             self.losses["D"] += errD
-            self.losses["l1"] += errl1
-            self.losses["l2"] += errl2
-            self.losses["GP"] += gradients_penalty
+            self.losses["l1"] += err_l1
+            self.losses["l2"] += err_l2
+            self.losses["GP"] += err_gp
 
             if self.print_verbose > 0:
-                print(
-                    f"[{i + 1:4d}/{len(self.dataloader):4d}] "
-                    f"D   {self.losses['D']/(i + 1):.4f} "
-                    f"G   {self.losses['G']/(i + 1):.4f} "
-                    f"L1  {self.losses['l1']/(i + 1):.3f} "
-                    f"L2  {self.losses['l2']/(i + 1):.3f} "
-                    f"GP  {self.losses['GP']/(i + 1):.3f} ",
-                    end="\r",
-                )
+                print(self._loss_message(i), end="\r")
 
-            dashboard.visualize(
-                x.cpu(),
-                y.cpu(),
-                label.cpu(),
-                cond=self.pivot,
-                normalize=True,
-            )
+            (x, y, label, bands, detects) = self.bander.process(x, y, label)
+            dashboard.visualize(x, y, label, bands, detects, pivot=self.pivot)
 
-    def _grad_penalty(self, x, y):
+        logger.info(f"\n{self._loss_message()}")
+
+    def _runtime(self, epoch, time):
+        mean_time = time / (epoch - self.base_epochs)
+        left_epoch = self.iter_epochs - epoch
+        done_time = time + mean_time * left_epoch
+
+        runtime = f"{time:4.2f} / {done_time:4.2f} sec "
+        return runtime
+
+    def _grad_penalty(self, y, x):
         gradients = y - x
         gradients_sqr = torch.square(gradients)
         gradients_sqr_sum = torch.sum(gradients_sqr)
         gradients_l2_norm = torch.sqrt(gradients_sqr_sum)
         gradients_penalty = torch.square(1 - gradients_l2_norm) / x.size(0)
         return gradients_penalty
+
+    def _loss_message(self, i=None):
+        if i is None:
+            i = len(self.dataset)
+
+        message = (
+            f"[{i + 1:4d}/{len(self.dataloader):4d}] "
+            f"D   {self.losses['D']/(i + 1):.4f} "
+            f"G   {self.losses['G']/(i + 1):.4f} "
+            f"L1  {self.losses['l1']/(i + 1):.3f} "
+            f"L2  {self.losses['l2']/(i + 1):.3f} "
+            f"GP  {self.losses['GP']/(i + 1):.3f} ",
+        )
+        return message

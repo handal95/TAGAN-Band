@@ -8,7 +8,7 @@ dataset:
     stride: 1
 
     batch_size: 1
-    seq_len: 18
+    seq_len: 24
     hidden_dim: 256
 
 model: 
@@ -29,7 +29,7 @@ train:
         gammaD: 1.0
         gammaG: 0.5
     
-    wgan:
+    bander:
         pivot: 12
         gp_weight: 1
         l1_gamma: 10

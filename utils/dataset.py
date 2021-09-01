@@ -19,21 +19,22 @@ class TimeseriesDataset:
         # Load Data
         logger.info("Dataset Setting")
         self.device = init_device()
-        self.init_config(config)
+        self.set_config(config)
 
         # Dataset
         data, label = self.load_data()
 
-        self.n_feature = len(data.columns)
         self.time = self.store_times(data)
         self.data = self.store_values(data, normalize=True)
         self.label = self.store_values(label, normalize=False)
 
+        self.in_dim = len(data.columns)
         self.data_len = len(self.data)
+        self.shape = (self.batch_size, self.seq_len, self.in_dim)
 
         self.replace = None
 
-    def init_config(self, config):
+    def set_config(self, config):
         self.title = config["data"]
         self.workers = config["workers"]
         self.key = config["key"]
@@ -47,9 +48,9 @@ class TimeseriesDataset:
         self.label_path = os.path.join(config["path"], f"{self.title}.json")
 
     def load_data(self):
-        
+
         _path_checker(self.data_path, force=True)
-        
+
         data = pd.read_csv(self.data_path)
         label = _json_load(self.label_path)["anomalies"]
 
@@ -71,7 +72,7 @@ class TimeseriesDataset:
                 end_time = pd.to_datetime(time_span[1])
 
                 for i in data.index:
-                    cur_time =  data[self.key][i]
+                    cur_time = data[self.key][i]
                     if start_time <= cur_time and cur_time <= end_time:
                         label[i] = TAG
             return label
@@ -147,47 +148,12 @@ class TimeseriesDataset:
         output = 0.5 * (x * self.max - x * self.min + self.max + self.min)
         return output
 
-    def get_sample(self, x, netG, shape, cond):
-        z = torch.randn(shape).to(self.device)
-        if cond > 0:
-            z[:, :cond, :] = x[:, :cond, :]
-
-        y = netG(z).to(self.device)
-        return y
-
-    def impute_missing_value(self, x, y, label, cond):
-        # TODO : Need to refactoring
-        if self.check_missing(label):
-            if self.replace is None:
-                self.replace = x
-            else:
-                self.replace[:, :-1] = self.replace[:, 1:].clone()
-
-            if self.check_missing(label, latest=True):
-                y_ = y.cpu().detach().numpy()
-                m = np.median(y_[:, :], axis=1)
-                y = np.random.normal(m, y_[:, cond:].std() / 2, y.shape)
-                self.replace[:, -1:] = torch.Tensor(y[:, -1:, :])
-                print("replaced")
-            else:
-                self.replace[:, -1:] = x[:, -1:, :]
-
-            x[0] = self.replace.to(self.device)
-        else:
-            if self.replace is not None:
-                self.replace = None
-
-        return x
-
-    def check_missing(self, label, latest=False):
-        label_ = label[:, -1] if latest is True else label
-        return True in np.isin(label_, [MISSING])
-
     def __len__(self):
         return self.data_len
 
     def __getitem__(self, idx):
         return self.data[idx], self.label[idx]
+
 
 def _path_checker(path, force=False):
     if os.path.exists(path):
@@ -196,6 +162,7 @@ def _path_checker(path, force=False):
         logger.warn(f"{path} is not founed")
         raise FileNotFoundError
     return False
+
 
 def _json_load(path):
     with open(path) as f:
