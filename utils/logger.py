@@ -1,7 +1,9 @@
-import logging.config
+import pytz
 import structlog
+import logging.config
 
-timestamper = structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S")
+KST = pytz.timezone('Asia/Seoul')
+timestamper = structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S", utc=False)
 pre_chain = [structlog.stdlib.add_log_level, timestamper]
 
 

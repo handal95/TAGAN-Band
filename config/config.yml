@@ -1,0 +1,41 @@
+
+dataset:
+    path: "data\\"
+    data: "ambient_temperature_system_failure"
+    key: "timestamp"
+
+    workers: 2
+    stride: 1
+
+    batch_size: 1
+    seq_len: 18
+    hidden_dim: 256
+
+model: 
+    path: "models/pretrained/"
+    save: False
+    load: True
+    interval: 100
+    tag: "10000"
+
+train:
+    epochs: 
+        base: 0
+        iter: 1000
+        critic: 1
+
+    learning_rate: 
+        base: 0.0002
+        gammaD: 1.0
+        gammaG: 0.5
+    
+    wgan:
+        pivot: 12
+        gp_weight: 1
+        l1_gamma: 10
+        l2_gamma: 10
+print:
+    verbose: 1
+    newline: 100
+
+visual: True

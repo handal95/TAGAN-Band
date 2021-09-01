@@ -6,105 +6,24 @@ import torch.nn.functional as F
 class GANLoss(nn.Module):
     def __init__(self, real_label=0.9, fake_label=0.1):
         super(GANLoss, self).__init__()
+        self.register_buffer("none_label", torch.tensor(0.5))
         self.register_buffer("real_label", torch.tensor(real_label))
         self.register_buffer("fake_label", torch.tensor(fake_label))
         self.loss = nn.MSELoss()
 
-    def get_target_tensor(self, input, target_is_real):
-        if target_is_real:
-            target_tensor = self.real_label
+    def get_target_tensor(self, input, target_is_real, imputate):
+        if imputate is False:
+            if target_is_real:
+                target_tensor = self.real_label
+            else:
+                target_tensor = self.fake_label
         else:
-            target_tensor = self.fake_label
+            target_tensor = self.none_label
+
         return target_tensor.expand_as(input)
 
-    def __call__(self, input, target_is_real):
-        target_tensor = self.get_target_tensor(input, target_is_real).to(input.device)
+    def __call__(self, input, target_is_real, imputate=False):
+        target_tensor = self.get_target_tensor(input, target_is_real, imputate).to(
+            input.device
+        )
         return self.loss(input, target_tensor)
-
-
-class SSIM(torch.nn.Module):
-    def __init__(self, window_size=11, size_average=True):
-        super(SSIM, self).__init__()
-        self.window_size = window_size
-        self.size_average = size_average
-        self.channel = 1
-        # self.window = create_window(window_size, self.channel)
-
-    def forward(self, series1, series2):
-        print(series1.shape)
-        print(series2.shape)
-
-        # (_, channel, _, _) = img1.size()
-
-        # if channel == self.channel and self.window.data.type() == img1.data.type():
-        #     window = self.window
-        # else:
-        #     window = create_window(self.window_size, channel)
-
-        #     if img1.is_cuda:
-        #         window = window.cuda(img1.get_device())
-        #     window = window.type_as(img1)
-
-        #     self.window = window
-        #     self.channel = channel
-
-        # return _ssim(img1, img2, window, self.window_size, channel, self.size_average)
-
-
-def _ssim(img1, img2, window, window_size, channel, size_average=True):
-    mu1 = F.conv2d(img1, window, padding=window_size // 2, groups=channel)
-    mu2 = F.conv2d(img2, window, padding=window_size // 2, groups=channel)
-
-    mu1_sq = mu1.pow(2)
-    mu2_sq = mu2.pow(2)
-    mu1_mu2 = mu1 * mu2
-
-    sigma1_sq = (
-        F.conv2d(img1 * img1, window, padding=window_size // 2, groups=channel) - mu1_sq
-    )
-    sigma2_sq = (
-        F.conv2d(img2 * img2, window, padding=window_size // 2, groups=channel) - mu2_sq
-    )
-    sigma12 = (
-        F.conv2d(img1 * img2, window, padding=window_size // 2, groups=channel)
-        - mu1_mu2
-    )
-
-    C1 = 0.01 ** 2
-    C2 = 0.03 ** 2
-
-    ssim_map = ((2 * mu1_mu2 + C1) * (2 * sigma12 + C2)) / (
-        (mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2)
-    )
-
-    if size_average:
-        return ssim_map.mean()
-    else:
-        return ssim_map.mean(1).mean(1).mean(1)
-
-
-# class DL1(torch.nn.Module):
-#     def __init__(self, window_size = 11, size_average = True):
-#         super(DL1, self).__init__()
-#         self.window_size = window_size
-#         self.size_average = size_average
-#         self.channel = 1
-#         self.window = create_window(window_size, self.channel)
-
-#     def forward(self, img1, img2):
-#         (_, channel, _, _) = img1.size()
-
-#         if channel == self.channel and self.window.data.type() == img1.data.type():
-#             window = self.window
-#         else:
-#             window = create_window(self.window_size, channel)
-
-#             if img1.is_cuda:
-#                 window = window.cuda(img1.get_device())
-#             window = window.type_as(img1)
-
-#             self.window = window
-#             self.channel = channel
-
-
-#         return _ssim(img1, img2, window, self.window_size, channel, self.size_average)

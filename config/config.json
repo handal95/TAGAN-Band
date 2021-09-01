@@ -1,20 +1,18 @@
 {
     "dataset": {
         "path": "data\\",
-        "data": "ambient_temperature_system_failure.csv",
-        "anomaly": "ambient_temperature_system_failure.json",
-        "index": "timestamp",
+        "data": "ambient_temperature_system_failure",
+        "key": "timestamp",
 
         "workers": 2,
-        "shuffle": false,
         "stride": 1,
 
         "batch_size": 1,
-        "seq_len": 12,
+        "seq_len": 18,
         "hidden_dim": 256
     },
     "model": {
-        "path": "pretrained/",
+        "path": "models/pretrained/",
         "save": false,
         "load": true,
         "interval": 100,
@@ -32,20 +30,15 @@
             "gammaG": 0.5
         },
         "wgan":{
-            "cond": 6,
-            "gp_weight": 1
+            "pivot": 12,
+            "gp_weight": 1,
+            "l1_gamma": 10,
+            "l2_gamma": 10
         } 
     },
     "print": {
-        "verbose": 0,
+        "verbose": 1,
         "newline": 100
     },
-    "result": {
-        "bands_sigma": {
-            "safety": 0.5,
-            "normal": 1.0,
-            "notion": 2.0,
-            "danger": 3.0
-        }
-    }
+    "visual": true
 }
