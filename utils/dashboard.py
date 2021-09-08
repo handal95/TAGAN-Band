@@ -40,11 +40,36 @@ class Dashboard:
                 data_list[i] = np.zeros(i)
             return data_list
         return value
+    
+    def reset_figure(self):
+        self.ax.clear()
+        self.ax.grid()
+        return self.fig, self.ax
+    
+    def show_figure(self):
+        self.fig.show()
+        self.fig.canvas.draw()
+        self.fig.canvas.flush_events()
+        
+    def train_vis(self, data):
+        fig, ax = self.reset_figure()
 
+        ax.plot(data, "r-", alpha=1, label="data")
+        
+        # Fill Background Valid Area
+        plt.fill_between(
+            (self.dataset.train_idx, self.dataset.valid_idx),
+            self.dataset.min, self.dataset.max, alpha=0.2
+        )
+        
+        # Set Y limit by min-max
+        plt.ylim(self.dataset.min, self.dataset.max)
+
+        self.show_figure()
+        
     def visualize(self, data, pred, label, bands, detects, pivot):
-        fig, ax = self.fig, self.ax
-        ax.clear()
-        ax.grid()
+        fig, ax = self.reset_figure()
+
         start = max(self.seq_len, data.size - self.scope + 1)
 
         length = len(pred)
@@ -91,6 +116,4 @@ class Dashboard:
         plt.xticks(xtick, values, rotation=30)
         plt.legend()
 
-        fig.show()
-        fig.canvas.draw()
-        fig.canvas.flush_events()
+        self.show_figure()

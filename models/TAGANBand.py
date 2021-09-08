@@ -13,7 +13,7 @@ from utils.loss import GANLoss
 from utils.logger import Logger
 from utils.device import init_device
 from utils.dashboard import Dashboard
-from utils.dataset import TimeseriesDataset
+from utils.dataset_v2 import TimeseriesDataset
 
 logger = Logger(__file__)
 
@@ -149,7 +149,20 @@ class TAGANBand:
         )
         netD = LSTMDiscriminator(in_dim, hidden_dim=hidden_dim, device=device)
         return (netG, netD)
+    
+    def train(self):
+        logger.info("Train the model")
+        
+        dashboard = Dashboard(self.dataset)
+        for epochs in range(1):
+            for i, (data, label) in enumerate(self.dataloader):
 
+                x = self.bander.single_process(data)
+                dashboard.train_vis(x)
+                print(f"[{i:4d}/{len(self.dataloader):4d}", end='\r')
+                
+        input()
+                
     def run(self):
         logger.info("Evaluate the model")
 

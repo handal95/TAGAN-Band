@@ -23,8 +23,9 @@ if __name__ == "__main__":
     # Input the parameters when creating the model
     # By using 'config.json' or json format parameter
     model = TAGANBand(config=config)
-    model.run()
+    model.train()
+    # model.run()
     
     # get OUTPUT Option
     # output file path : ./output_{data_title}.csv
-    model.get_labels(text=True)
+    # model.get_labels(text=True)

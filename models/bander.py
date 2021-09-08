@@ -39,6 +39,13 @@ class TAGAN_Bander:
         
         sigma = config["sigmas"]
         self.sigmas = [sigma["inner"], sigma["normal"], sigma["warning"]]
+        
+    def single_process(self, x, normalized=True):
+        if normalized:
+            x = self._denormalize(x)[0].numpy().ravel()
+
+        self.data = self.data_concat(self.data, x)
+        return self.data
 
     def process(self, x, y, label, normalized=True):
         if normalized:

@@ -9,7 +9,13 @@
 
         "batch_size": 1,
         "seq_len": 12,
-        "hidden_dim": 256
+        "hidden_dim": 256,
+        "train": {
+            "opt": true,
+            "train_rate": 0.8,
+            "valid_rate": 0.1,
+            "test_rate": 0.1
+        }
     },
     "model": {
         "path": "models/pretrained/",
@@ -45,5 +51,5 @@
         "verbose": 1,
         "newline": 100
     },
-    "visual": false
+    "visual": true
 }
