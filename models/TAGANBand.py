@@ -154,12 +154,78 @@ class TAGANBand:
         logger.info("Train the model")
         
         dashboard = Dashboard(self.dataset)
-        for epochs in range(1):
+        for epoch in range(1):
             for i, (data, label) in enumerate(self.dataloader):
+                # Critics
+                # for i in range(self.iter_critic):
+                #     y, x = self.bander.get_random_sample(self.netG)
+                    
+                #     Dx = self.netD(x)
+                #     Dy = self.netD(y)
+                #     self.optimizerD.zero_grad()
+                    
+                #     loss_GP = self.gp_weight * self._grad_penalty(y, x)
+                #     loss_D_ = Dy.mean() - Dx.mean()
+                    
+                #     loss_D = loss_D_ + loss_GP
+                #     loss_D.backward()
+                #     self.optimizerD.step()
 
-                x = self.bander.single_process(data)
-                dashboard.train_vis(x)
-                print(f"[{i:4d}/{len(self.dataloader):4d}", end='\r')
+                #     if i == self.iter_critic - 1:
+                #         self.losses["D"] += loss_D
+                #         self.losses["GP"] += loss_GP
+                
+                # Vanilla
+                self.optimizerD.zero_grad()
+                self.optimizerG.zero_grad()
+
+                x = data.to(self.device)
+                Dx = self.netD(x)
+                errD_real = self.criterion_adv(Dx, target_is_real=True)
+                errD_real.backward(retain_graph=True)
+            
+                y = self.bander.get_sample(x, self.netG)
+                Dy = self.netD(y)
+                errD_fake = self.criterion_adv(Dy, target_is_real=False)
+                errD_fake.backward(retain_graph=True)
+
+                errD = errD_fake + errD_real
+                self.optimizerD.step()
+
+                Dy = self.netD(y)
+                err_G = self.criterion_adv(Dy, target_is_real=False)
+                err_l1 = self.l1_gamma * self.criterion_l1n(y, x)
+                err_l2 = self.l2_gamma * self.criterion_l2n(y, x)
+                err_gp = self.gp_weight * self._grad_penalty(y, x)
+                errG = err_G + err_l1 + err_l2 + err_gp
+                errG.backward(retain_graph=True)                            
+                self.optimizerG.step()
+                    
+                origin = self.bander.single_process(x)
+                y = self.bander.get_sample(x, self.netG)
+                predict = self.bander.single_process(y[:, self.pivot:, :], predict=True)
+
+                self.losses["G"] += err_G
+                self.losses["D"] += errD
+                self.losses["l1"] += err_l1
+                self.losses["l2"] += err_l2
+                self.losses["GP"] += err_gp
+
+                # Print loss
+                if self.print_verbose > 0:
+                    print(
+                        f"[{(epoch + 1):4d}/{self.iter_epochs:4d}]"
+                        f" D  {self.losses['D']:2.4f}"
+                        f" G  {self.losses['G']:2.4f}",
+                        f" L1 {self.losses['l1']:2.4f} ",
+                        f" L2 {self.losses['l2']:2.4f} ",
+                        f" GP  {self.losses['GP']:.4f}",
+                        end="\r",
+                    )
+                
+                # Visualize
+                dashboard.train_vis(origin, predict)
+
                 
         input()
                 
@@ -184,8 +250,8 @@ class TAGANBand:
             errD_real.backward(retain_graph=True)
 
             y = self.bander.get_sample(x, self.netG)
-            Gy = self.netD(y)
-            errD_fake = self.criterion_adv(Gy, target_is_real=False)
+            Dy = self.netD(y)
+            errD_fake = self.criterion_adv(Dy, target_is_real=False)
             errD_fake.backward(retain_graph=True)
 
             errD = errD_fake + errD_real

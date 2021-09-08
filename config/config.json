@@ -7,7 +7,7 @@
         "workers": 2,
         "stride": 1,
 
-        "batch_size": 1,
+        "batch_size": 4,
         "seq_len": 12,
         "hidden_dim": 256,
         "train": {

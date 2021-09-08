@@ -40,12 +40,24 @@ class TAGAN_Bander:
         sigma = config["sigmas"]
         self.sigmas = [sigma["inner"], sigma["normal"], sigma["warning"]]
         
-    def single_process(self, x, normalized=True):
+    def single_process(self, data, normalized=True, predict=False):
         if normalized:
-            x = self._denormalize(x)[0].numpy().ravel()
+            print("from", data.shape)
+            data = self._denormalize(data).numpy().ravel()
+            print("to", data.shape)
 
-        self.data = self.data_concat(self.data, x)
-        return self.data
+        if predict:
+            self.pred = self.data_concat(self.pred, data)
+            return self.pred
+        else:
+            self.data = self.data_concat(self.data, data)
+            return self.data
+
+    # def pred_concat(self, data, normalized=True):
+    #     if target is None:
+    #         target = x[: self.pivot]
+
+    #     return np.concatenate((target[: 1 - self.pivot], x[: self.pivot]))
 
     def process(self, x, y, label, normalized=True):
         if normalized:
@@ -111,6 +123,15 @@ class TAGAN_Bander:
 
         y = netG(z).to(self.device)
         return y
+    
+    def get_random_sample(self, netG):
+        idx = np.random.randint(self.dataset.shape)
+        x, _ = self.dataset[idx]
+
+        x = x.to(self.device)
+        y = self.get_sample(x, netG)
+
+        return y, x
 
     def impute_missing_value(self, x, y, label, pivot):
         # TODO : Need to refactoring

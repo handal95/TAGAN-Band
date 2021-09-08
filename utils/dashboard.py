@@ -51,15 +51,17 @@ class Dashboard:
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
         
-    def train_vis(self, data):
+    def train_vis(self, origin, predict):
         fig, ax = self.reset_figure()
 
-        ax.plot(data, "r-", alpha=1, label="data")
+        ax.plot(origin, "k-", alpha=1, label="origin data")
+        ax.plot(predict, "r-", alpha=1, label="predict data", )
         
         # Fill Background Valid Area
         plt.fill_between(
             (self.dataset.train_idx, self.dataset.valid_idx),
-            self.dataset.min, self.dataset.max, alpha=0.2
+            self.dataset.min, self.dataset.max, alpha=0.2,
+            label="Valid Set"
         )
         
         # Set Y limit by min-max
