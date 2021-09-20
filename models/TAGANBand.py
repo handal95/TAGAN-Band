@@ -149,24 +149,24 @@ class TAGANBand:
         )
         netD = LSTMDiscriminator(in_dim, hidden_dim=hidden_dim, device=device)
         return (netG, netD)
-    
+
     def train(self):
         logger.info("Train the model")
-        
+
         dashboard = Dashboard(self.dataset)
         for epoch in range(1):
             for i, (data, label) in enumerate(self.dataloader):
                 # Critics
                 # for i in range(self.iter_critic):
                 #     y, x = self.bander.get_random_sample(self.netG)
-                    
+
                 #     Dx = self.netD(x)
                 #     Dy = self.netD(y)
                 #     self.optimizerD.zero_grad()
-                    
+
                 #     loss_GP = self.gp_weight * self._grad_penalty(y, x)
                 #     loss_D_ = Dy.mean() - Dx.mean()
-                    
+
                 #     loss_D = loss_D_ + loss_GP
                 #     loss_D.backward()
                 #     self.optimizerD.step()
@@ -174,7 +174,7 @@ class TAGANBand:
                 #     if i == self.iter_critic - 1:
                 #         self.losses["D"] += loss_D
                 #         self.losses["GP"] += loss_GP
-                
+
                 # Vanilla
                 self.optimizerD.zero_grad()
                 self.optimizerG.zero_grad()
@@ -183,7 +183,7 @@ class TAGANBand:
                 Dx = self.netD(x)
                 errD_real = self.criterion_adv(Dx, target_is_real=True)
                 errD_real.backward(retain_graph=True)
-            
+
                 y = self.bander.get_sample(x, self.netG)
                 Dy = self.netD(y)
                 errD_fake = self.criterion_adv(Dy, target_is_real=False)
@@ -198,9 +198,9 @@ class TAGANBand:
                 err_l2 = self.l2_gamma * self.criterion_l2n(y, x)
                 err_gp = self.gp_weight * self._grad_penalty(y, x)
                 errG = err_G + err_l1 + err_l2 + err_gp
-                errG.backward(retain_graph=True)                            
+                errG.backward(retain_graph=True)
                 self.optimizerG.step()
-                    
+
                 origin = self.bander.single_process(x)
                 y = self.bander.get_sample(x, self.netG)
                 predict = self.bander.single_process(y, predict=True)
@@ -222,14 +222,13 @@ class TAGANBand:
                         f" GP  {self.losses['GP']:.4f}",
                         end="\r",
                     )
-                
+
                 # Visualize
                 dashboard.train_vis(origin, predict)
                 print(origin.shape, predict.shape)
 
-                
         input()
-                
+
     def run(self):
         logger.info("Evaluate the model")
 
@@ -278,21 +277,21 @@ class TAGANBand:
                 print(f"{self._loss_message(i)}", end="\r")
 
             (x, y, label, bands, detects) = self.bander.process(x, y, label)
-            
+
             if self.visual:
                 dashboard.visualize(x, y, label, bands, detects, pivot=self.pivot)
 
         logger.info(f"\n{self._loss_message()}")
-        
+
     def get_labels(self, text=False):
         origin = self.dataset.origin
         pred = self.bander.pred
         median = self.bander.bands["median"]
-        pred[:len(median)] = median
+        pred[: len(median)] = median
         labels = self.bander.label
-        
+
         output_path = f"output_{self.dataset.title}.csv"
-        
+
         if text:
             text_label = list()
             LABELS = {
@@ -300,7 +299,7 @@ class TAGANBand:
                 0.0: "Normal",
                 1.0: "Labeled-Anomal",
                 2.0: "Detected-Warning",
-                3.0: "Detected-Outlier"
+                3.0: "Detected-Outlier",
             }
 
             for label in labels:

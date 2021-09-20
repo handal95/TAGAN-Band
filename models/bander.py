@@ -10,6 +10,7 @@ ANOMALY = 1.0
 WARNING = 2.0
 OUTLIER = 3.0
 
+
 class TAGAN_Bander:
     def __init__(self, dataset, config):
         logger.info("Bander Setting")
@@ -36,16 +37,16 @@ class TAGAN_Bander:
         self.gp_weight = config["gp_weight"]
         self.l1_gamma = config["l1_gamma"]
         self.l2_gamma = config["l2_gamma"]
-        
+
         sigma = config["sigmas"]
         self.sigmas = [sigma["inner"], sigma["normal"], sigma["warning"]]
-        
+
     def single_process(self, data, normalized=True, predict=False):
         if normalized:
             if predict is False:
-                data = self._denormalize(data[:,0,:]).numpy().ravel()
+                data = self._denormalize(data[:, 0, :]).numpy().ravel()
             else:
-                data = self._denormalize(data[:,self.pivot, :]).numpy().ravel()
+                data = self._denormalize(data[:, self.pivot, :]).numpy().ravel()
 
         if predict:
             self.pred = self.data_concat(self.pred, data, predict=predict)
@@ -102,7 +103,7 @@ class TAGAN_Bander:
 
         elif True in np.isin(label[pivot], [ANOMALY]):
             self.detects["labeled"].append((xpos, "red"))
-            
+
         for i in range(1, 3):
             color = "red" if i == 2 else "black"
             LABEL = OUTLIER if i == 2 else WARNING
@@ -124,7 +125,7 @@ class TAGAN_Bander:
 
         y = netG(z).to(self.device)
         return y
-    
+
     def get_random_sample(self, netG):
         idx = np.random.randint(self.dataset.shape)
         x, _ = self.dataset[idx]
@@ -167,7 +168,7 @@ class TAGAN_Bander:
             if predict is False:
                 return x[-1:]
             return x
-        
+
         # if predict:
         #     return np.concatenate((target[:], x[:]))
 

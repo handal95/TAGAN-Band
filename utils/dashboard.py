@@ -40,35 +40,42 @@ class Dashboard:
                 data_list[i] = np.zeros(i)
             return data_list
         return value
-    
+
     def reset_figure(self):
         self.ax.clear()
         self.ax.grid()
         return self.fig, self.ax
-    
+
     def show_figure(self):
         self.fig.show()
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
-        
+
     def train_vis(self, origin, predict):
         fig, ax = self.reset_figure()
 
         ax.plot(origin, "k-", alpha=1, label="origin data")
-        ax.plot(predict, "r-", alpha=1, label="predict data", )
-        
+        ax.plot(
+            predict,
+            "r-",
+            alpha=1,
+            label="predict data",
+        )
+
         # Fill Background Valid Area
         plt.fill_between(
             (self.dataset.train_idx, self.dataset.valid_idx),
-            self.dataset.min, self.dataset.max, alpha=0.2,
-            label="Valid Set"
+            self.dataset.min,
+            self.dataset.max,
+            alpha=0.2,
+            label="Valid Set",
         )
-        
+
         # Set Y limit by min-max
         plt.ylim(self.dataset.min, self.dataset.max)
 
         self.show_figure()
-        
+
     def visualize(self, data, pred, label, bands, detects, pivot):
         fig, ax = self.reset_figure()
 
@@ -78,7 +85,9 @@ class Dashboard:
 
         # Pivot and Predict Area
         base = max(0, length - self.seq_len - start)
-        detected = True in np.isin(label[:pivot], [1]) or True in np.isin(label[:pivot], [-1])
+        detected = True in np.isin(label[:pivot], [1]) or True in np.isin(
+            label[:pivot], [-1]
+        )
         pivot_color = "red" if detected else "lightblue"
         preds_color = "red" if detected else "green"
         plt.axvspan(base + pivot, length - start, facecolor=pivot_color, alpha=0.7)
@@ -105,7 +114,7 @@ class Dashboard:
                 color=color,
                 alpha=alpha,
             )
-        
+
         # Data/Predict Line
         ax.plot(data[start:], "r-", alpha=1, label="data")
         ax.plot(pred[start:], "b-", alpha=0.2, label="pred")

@@ -47,12 +47,12 @@ class TimeseriesDataset:
         self.seq_len = config["seq_len"]
         self.batch_size = config["batch_size"]
         self.hidden_dim = config["hidden_dim"]
-        
+
         self.train_option = config["train"]["opt"]
         self.split_rate = {
             "train": config["train"]["train_rate"],
             "valid": config["train"]["valid_rate"],
-            "test": config["train"]["test_rate"], 
+            "test": config["train"]["test_rate"],
         }
 
         self.data_path = os.path.join(config["path"], f"{self.title}.csv")
@@ -74,20 +74,20 @@ class TimeseriesDataset:
     def split_data(self, data):
         if self.train_option is False:
             return (data, None, None)
-        
+
         logger.info(
             f"Data Split >> "
             f"(Train: {self.split_rate['train']}, "
-            f"Valid: {self.split_rate['valid']})")
-        
+            f"Valid: {self.split_rate['valid']})"
+        )
+
         self.train_idx = int(len(data) * (self.split_rate["train"]))
         self.valid_idx = self.train_idx + int(len(data) * (self.split_rate["valid"]))
-        
-        train_set = data[:self.valid_idx]
-        test_set = data[self.valid_idx:]
-        
-        return (train_set, test_set)
 
+        train_set = data[: self.valid_idx]
+        test_set = data[self.valid_idx :]
+
+        return (train_set, test_set)
 
     def labeling(self, data, anomalies):
         data, missings = self.check_missing_value(data)
@@ -164,7 +164,7 @@ class TimeseriesDataset:
         """Normalize input in [-1,1] range, saving statics for denormalization"""
         self.max = x.max()
         self.min = x.min()
-        
+
         output = 2 * (x - x.min()) / (x.max() - x.min()) - 1
         return output
 
@@ -181,7 +181,6 @@ class TimeseriesDataset:
 
     def __getitem__(self, idx):
         return self.data[idx], self.label[idx]
-    
 
 
 def _path_checker(path, force=False):
