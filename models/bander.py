@@ -21,6 +21,7 @@ class TAGAN_Bander:
 
         self.label = None
         self.label_info = []
+        self.mdata = None
         self.data = None
         self.pred = None
         self.bands = {
@@ -40,13 +41,26 @@ class TAGAN_Bander:
 
         sigma = config["sigmas"]
         self.sigmas = [sigma["inner"], sigma["normal"], sigma["warning"]]
+        
+    def variables(self, data):
+        batch_size = data.size(0)
+        data = data.cpu().detach()
+
+        if self.mdata is None:
+            self.mdata = data[0, :0, :]
+
+        for batch in range(batch_size):
+            self.mdata = np.concatenate((self.mdata, data[batch, :1, :]))
+
+        return self.mdata
+        
 
     def single_process(self, data, normalized=True, predict=False):
         if normalized:
             if predict is False:
-                data = self._denormalize(data[:, 0, :]).numpy().ravel()
+                data = self._denormalize(data[:, :, :]).numpy().ravel()
             else:
-                data = self._denormalize(data[:, self.pivot, :]).numpy().ravel()
+                data = self._denormalize(data[:, :, :]).numpy().ravel()
 
         if predict:
             self.pred = self.data_concat(self.pred, data, predict=predict)
@@ -128,7 +142,7 @@ class TAGAN_Bander:
 
     def get_random_sample(self, netG):
         idx = np.random.randint(self.dataset.shape)
-        x, _ = self.dataset[idx]
+        x = self.dataset[idx]
 
         x = x.to(self.device)
         y = self.get_sample(x, netG)

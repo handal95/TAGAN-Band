@@ -50,29 +50,26 @@ class Dashboard:
         self.fig.show()
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
+        
+        return self.fig
 
-    def train_vis(self, origin, predict):
+    def train_vis(self, origins):
         fig, ax = self.reset_figure()
 
-        ax.plot(origin, "k-", alpha=1, label="origin data")
-        ax.plot(
-            predict,
-            "r-",
-            alpha=1,
-            label="predict data",
-        )
+        for i in range(1, 43):
+            ax.plot(origins[:, i], alpha=1, label=f"Column{i} data")
+        
+        # # Fill Background Valid Area
+        # plt.fill_between(
+        #     (self.dataset.train_idx, self.dataset.valid_idx),
+        #     self.dataset.min,
+        #     self.dataset.max,
+        #     alpha=0.2,
+        #     label="Valid Set",
+        # )
 
-        # Fill Background Valid Area
-        plt.fill_between(
-            (self.dataset.train_idx, self.dataset.valid_idx),
-            self.dataset.min,
-            self.dataset.max,
-            alpha=0.2,
-            label="Valid Set",
-        )
-
-        # Set Y limit by min-max
-        plt.ylim(self.dataset.min, self.dataset.max)
+        # # Set Y limit by min-max
+        # plt.ylim(self.dataset.min, self.dataset.max)
 
         self.show_figure()
 

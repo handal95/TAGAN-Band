@@ -90,9 +90,9 @@ class LSTMDiscriminator(nn.Module):
         outputs = self.linear(
             recurrent_features.contiguous().view(batch_size * seq_len, self.hidden_dim)
         )
-        outputs = outputs.view(batch_size, seq_len, self.in_dim)
+        outputs = outputs.view(batch_size, seq_len, 1)
 
-        return outputs
+        return outputs.to(self.device)
 
 
 if __name__ == "__main__":

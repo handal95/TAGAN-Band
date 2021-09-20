@@ -1,12 +1,12 @@
 import os
 import json
 import numpy as np
-
+import torch
 from utils.seed import seeding
 from models.TAGANBand import TAGANBand
 
-seeding(31)
-np.set_printoptions(linewidth=np.inf)
+torch.set_printoptions(precision=4)
+np.set_printoptions(linewidth=np.inf, precision=6, suppress=True)
 
 
 def use_default_config(path="config/config.json"):
@@ -17,12 +17,14 @@ def use_default_config(path="config/config.json"):
 
 
 if __name__ == "__main__":
+
     # Argument options - JSON
     config = None
 
     # Setting the JSON configuration for parameter
     # If use the RESTFul API, Skip this section and using JSON params.
     config = use_default_config("config/config.json")
+    seeding(31)
 
     # Input the parameters when creating the model
     # By using 'config.json' or json format parameter

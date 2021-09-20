@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.optim as optim
 import pandas as pd
 
+from tqdm import tqdm
 from models.bander import TAGAN_Bander
 from models.LSTMGAN import LSTMGenerator, LSTMDiscriminator
 
@@ -114,7 +115,7 @@ class TAGANBand:
 
     def init_model(self):
         netG, netD = self.load_model(self.load)
-
+        
         # Set Oprimizer
         self.optimizerD = optim.RMSprop(netD.parameters(), lr=self.lr * self.lr_gammaD)
         self.optimizerG = optim.RMSprop(netG.parameters(), lr=self.lr * self.lr_gammaG)
@@ -129,6 +130,7 @@ class TAGANBand:
     def load_model(self, load_option=False):
         hidden_dim = self.dataset.hidden_dim
         in_dim = self.dataset.in_dim
+        out_dim = self.dataset.target_dim
         device = self.device
 
         if load_option is True:
@@ -146,34 +148,35 @@ class TAGANBand:
 
         netG = LSTMGenerator(
             in_dim, out_dim=in_dim, hidden_dim=hidden_dim, device=device
-        )
-        netD = LSTMDiscriminator(in_dim, hidden_dim=hidden_dim, device=device)
+        ).to(device)
+        netD = LSTMDiscriminator(in_dim, hidden_dim=hidden_dim, device=device).to(device)
         return (netG, netD)
 
     def train(self):
         logger.info("Train the model")
 
         dashboard = Dashboard(self.dataset)
-        for epoch in range(1):
-            for i, (data, label) in enumerate(self.dataloader):
-                # Critics
-                # for i in range(self.iter_critic):
-                #     y, x = self.bander.get_random_sample(self.netG)
+        for epoch in range(self.iter_epochs):
+            tqdm_dataset = tqdm(enumerate(self.dataloader))
+            losses = {"G": 0.0, "D": 0.0, "l1": 0.0, "l2": 0.0, "GP": 0.0}
+            for i, (data) in tqdm_dataset:
+                for critic in range(self.iter_critic):
+                    y, x = self.bander.get_random_sample(self.netG)
 
-                #     Dx = self.netD(x)
-                #     Dy = self.netD(y)
-                #     self.optimizerD.zero_grad()
+                    Dx = self.netD(x)
+                    Dy = self.netD(y)
+                    self.optimizerD.zero_grad()
 
-                #     loss_GP = self.gp_weight * self._grad_penalty(y, x)
-                #     loss_D_ = Dy.mean() - Dx.mean()
+                    loss_GP = self.gp_weight * self._grad_penalty(y, x)
+                    loss_D_ = Dy.mean() - Dx.mean()
 
-                #     loss_D = loss_D_ + loss_GP
-                #     loss_D.backward()
-                #     self.optimizerD.step()
+                    loss_D = loss_D_ + loss_GP
+                    loss_D.backward()
+                    self.optimizerD.step()
 
-                #     if i == self.iter_critic - 1:
-                #         self.losses["D"] += loss_D
-                #         self.losses["GP"] += loss_GP
+                    # if i == self.iter_critic - 1:
+                    #     self.losses["D"] += loss_D
+                    #     self.losses["GP"] += loss_GP
 
                 # Vanilla
                 self.optimizerD.zero_grad()
@@ -201,33 +204,34 @@ class TAGANBand:
                 errG.backward(retain_graph=True)
                 self.optimizerG.step()
 
-                origin = self.bander.single_process(x)
+                origins = self.bander.variables(x)
+                # origin = self.bander.single_process(x)
                 y = self.bander.get_sample(x, self.netG)
-                predict = self.bander.single_process(y, predict=True)
+                # predict = self.bander.single_process(y, predict=True)
 
-                self.losses["G"] += err_G
-                self.losses["D"] += errD
-                self.losses["l1"] += err_l1
-                self.losses["l2"] += err_l2
-                self.losses["GP"] += err_gp
+                losses["G"] += err_G
+                losses["D"] += errD
+                losses["l1"] += err_l1
+                losses["l2"] += err_l2
+                losses["GP"] += err_gp
 
                 # Print loss
-                if self.print_verbose > 0:
-                    print(
-                        f"[{(epoch + 1):4d}/{self.iter_epochs:4d}]"
-                        f" D  {self.losses['D']:2.4f}"
-                        f" G  {self.losses['G']:2.4f}",
-                        f" L1 {self.losses['l1']:2.4f} ",
-                        f" L2 {self.losses['l2']:2.4f} ",
-                        f" GP  {self.losses['GP']:.4f}",
-                        end="\r",
-                    )
+                if self.print_verbose > 5:
+                    tqdm_dataset.set_postfix({
+                        'Epoch': epoch + 1,
+                        'D': f'{losses["D"]:2.4f}',
+                        'G': f'{losses["G"]:2.4f}',
+                        'L1': f'{losses["l1"]:2.4f}',
+                        'L2': f'{losses["l2"]:2.4f}',
+                        'GP': f'{losses["GP"]:2.4f}',
+                        # 'Score': '{:06f}'.format(batch_score.item()),
+                        # 'Total Score' : '{:06f}'.format(total_score/(batch+1)),
+                    })
 
                 # Visualize
-                dashboard.train_vis(origin, predict)
-                print(origin.shape, predict.shape)
+                dashboard.train_vis(origins)
 
-        input()
+        # input()
 
     def run(self):
         logger.info("Evaluate the model")

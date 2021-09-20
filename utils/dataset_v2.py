@@ -23,7 +23,7 @@ class TimeseriesDataset:
         self.set_config(config)
 
         # Dataset
-        data, label = self.load_data()
+        data = self.load_data()
         self.index = data.index
         self.columns = data.columns
         self.origin = data.values
@@ -32,7 +32,7 @@ class TimeseriesDataset:
         data = self.train
         self.time = self.store_times(data)
         self.data = self.store_values(data, normalize=True)
-        self.label = self.store_values(label, normalize=False)
+        # self.label = self.store_values(label, normalize=False)
 
         self.in_dim = len(data.columns)
         self.data_len = len(self.data)
@@ -50,6 +50,7 @@ class TimeseriesDataset:
         self.seq_len = config["seq_len"]
         self.batch_size = config["batch_size"]
         self.hidden_dim = config["hidden_dim"]
+        self.target_dim = config["target_dim"]
 
         self.train_option = config["train"]["opt"]
         self.split_rate = {
@@ -59,25 +60,21 @@ class TimeseriesDataset:
         }
 
         self.data_path = os.path.join(config["path"], f"{self.title}.csv")
-        self.label_path = os.path.join(config["path"], f"{self.title}.json")
+        # self.label_path = os.path.join(config["path"], f"{self.title}.json")
 
     def load_data(self):
         _path_checker(self.data_path, force=True)
 
         data = pd.read_csv(self.data_path)
-        label = np.zeros(len(data))
-        if os.path.exists(self.label_path):
-            label = _json_load(self.label_path)["anomalies"]
-            data, label = self.labeling(data, label)
 
         if self.weekofday in data.columns:
             data[self.weekofday] = one_hot_encoding(data[self.weekofday])
 
-        # Labeling missing values (and known anomalies)
         data = data.set_index(self.key)
-        data = data.interpolate(method="time")
+        # Labeling missing values (and known anomalies)
+        # data = data.interpolate(method="time")
 
-        return data, label
+        return data
 
     def split_data(self, data):
         if self.train_option is False:
@@ -117,7 +114,7 @@ class TimeseriesDataset:
         label = pd.DataFrame({self.key: data[self.key], "value": label})
         label = label.set_index(self.key)
 
-        return data, label
+        return data # , label
 
     def check_missing_value(self, data):
         # TODO : Need Refactoring
@@ -159,37 +156,50 @@ class TimeseriesDataset:
         if data is None:
             return data
 
-        data = self.windowing(data)
         if normalize is True:
             data = self.normalize(data)
+
+        data = self.windowing(data)
         data = torch.from_numpy(data).float()
         return data
 
     def windowing(self, x):
         stop = len(x) - self.seq_len
-        return np.array([x[i : i + self.seq_len] for i in range(0, stop, self.stride)])
-
-    def normalize(self, x):
-        """Normalize input in [-1,1] range, saving statics for denormalization"""
-        self.max = x.max()
-        self.min = x.min()
-
-        output = 2 * (x - x.min()) / (x.max() - x.min()) - 1
+        output = np.array([x[i : i + self.seq_len] for i in range(0, stop, self.stride)])
         return output
 
-    def denormalize(self, x):
+    def normalize(self, data):
+        """Normalize input in [-1,1] range, saving statics for denormalization"""
+        # 2 * (x - x.min) / (x.max - x.min) - 1
+        self.max = data.iloc[:, 1:].max(0)
+        self.min = data.iloc[:, 1:].min()
+
+        data.iloc[:, 1:] = data.iloc[:, 1:] - self.min
+        data.iloc[:, 1:] = data.iloc[:, 1:] / (self.max - self.min)
+        data.iloc[:, 1:] = 2 * data.iloc[:, 1:] - 1
+        
+        self.max = torch.tensor(self.max)
+        self.min = torch.tensor(self.min)
+
+        return data
+
+    def denormalize(self, data):
         """Revert [-1,1] normalization"""
         if not hasattr(self, "max") or not hasattr(self, "min"):
             raise Exception("Try to denormalize, but the input was not normalized")
+        
+        for batch in range(self.batch_size):
+            data[batch, :, 1:] = 0.5 * data[batch, :, 1:] + 1
+            data[batch, :, 1:] = data[batch, :, 1:] * (self.max - self.min)
+            data[batch, :, 1:] = data[batch, :, 1:] + self.min
 
-        output = 0.5 * (x * self.max - x * self.min + self.max + self.min)
-        return output
+        return data
 
     def __len__(self):
         return self.data_len
 
     def __getitem__(self, idx):
-        return self.data[idx], self.label[idx]
+        return self.data[idx] # , self.label[idx]
 
 
 def _path_checker(path, force=False):
