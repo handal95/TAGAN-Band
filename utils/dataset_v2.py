@@ -6,6 +6,7 @@ import pandas as pd
 
 from utils.logger import Logger
 from utils.device import init_device
+from utils.preprocess import one_hot_encoding
 
 
 logger = Logger(__file__)
@@ -24,7 +25,8 @@ class TimeseriesDataset:
         # Dataset
         data, label = self.load_data()
         self.index = data.index
-        self.origin = data.value
+        self.columns = data.columns
+        self.origin = data.values
 
         (self.train, self.test) = self.split_data(data)
         data = self.train
@@ -42,6 +44,7 @@ class TimeseriesDataset:
         self.title = config["data"]
         self.workers = config["workers"]
         self.key = config["key"]
+        self.weekofday = config["weekofday"]
 
         self.stride = config["stride"]
         self.seq_len = config["seq_len"]
@@ -62,10 +65,15 @@ class TimeseriesDataset:
         _path_checker(self.data_path, force=True)
 
         data = pd.read_csv(self.data_path)
-        label = _json_load(self.label_path)["anomalies"]
+        label = np.zeros(len(data))
+        if os.path.exists(self.label_path):
+            label = _json_load(self.label_path)["anomalies"]
+            data, label = self.labeling(data, label)
+
+        if self.weekofday in data.columns:
+            data[self.weekofday] = one_hot_encoding(data[self.weekofday])
 
         # Labeling missing values (and known anomalies)
-        data, label = self.labeling(data, label)
         data = data.set_index(self.key)
         data = data.interpolate(method="time")
 
@@ -89,10 +97,8 @@ class TimeseriesDataset:
 
         return (train_set, test_set)
 
-    def labeling(self, data, anomalies):
+    def labeling(self, data, label, anomalies):
         data, missings = self.check_missing_value(data)
-
-        label = np.zeros(len(data))
 
         def _labeling(TAG, json_data):
             for time_span in json_data:
@@ -150,7 +156,10 @@ class TimeseriesDataset:
         return time
 
     def store_values(self, data, normalize=False):
-        data = self.windowing(data[["value"]])
+        if data is None:
+            return data
+
+        data = self.windowing(data)
         if normalize is True:
             data = self.normalize(data)
         data = torch.from_numpy(data).float()

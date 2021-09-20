@@ -8,11 +8,14 @@ from models.TAGANBand import TAGANBand
 seeding(31)
 np.set_printoptions(linewidth=np.inf)
 
+
 def use_default_config(path="config/config.json"):
     if os.path.exists(path):
         with open(path) as f:
             config = json.load(f)
     return config
+
+
 if __name__ == "__main__":
     # Argument options - JSON
     config = None

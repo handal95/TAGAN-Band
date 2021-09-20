@@ -1,14 +1,15 @@
 {
     "dataset": {
         "path": "data\\",
-        "data": "ambient_temperature_system_failure",
-        "key": "timestamp",
+        "data": "agricultural_product",
+        "key": "date",
+        "weekofday": "weekofday",
 
         "workers": 2,
         "stride": 1,
 
-        "batch_size": 4,
-        "seq_len": 12,
+        "batch_size": 16,
+        "seq_len": 18,
         "hidden_dim": 256,
         "train": {
             "opt": true,
