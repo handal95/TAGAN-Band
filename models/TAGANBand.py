@@ -203,7 +203,7 @@ class TAGANBand:
                     
                 origin = self.bander.single_process(x)
                 y = self.bander.get_sample(x, self.netG)
-                predict = self.bander.single_process(y[:, self.pivot:, :], predict=True)
+                predict = self.bander.single_process(y, predict=True)
 
                 self.losses["G"] += err_G
                 self.losses["D"] += errD
@@ -225,6 +225,7 @@ class TAGANBand:
                 
                 # Visualize
                 dashboard.train_vis(origin, predict)
+                print(origin.shape, predict.shape)
 
                 
         input()

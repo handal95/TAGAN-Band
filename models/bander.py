@@ -42,15 +42,16 @@ class TAGAN_Bander:
         
     def single_process(self, data, normalized=True, predict=False):
         if normalized:
-            print("from", data.shape)
-            data = self._denormalize(data).numpy().ravel()
-            print("to", data.shape)
+            if predict is False:
+                data = self._denormalize(data[:,0,:]).numpy().ravel()
+            else:
+                data = self._denormalize(data[:,self.pivot, :]).numpy().ravel()
 
         if predict:
-            self.pred = self.data_concat(self.pred, data)
+            self.pred = self.data_concat(self.pred, data, predict=predict)
             return self.pred
         else:
-            self.data = self.data_concat(self.data, data)
+            self.data = self.data_concat(self.data, data, predict=predict)
             return self.data
 
     # def pred_concat(self, data, normalized=True):
@@ -161,11 +162,16 @@ class TAGAN_Bander:
         label_ = label[:, -1] if latest is True else label
         return True in np.isin(label_, [MISSING])
 
-    def data_concat(self, target, x):
+    def data_concat(self, target, x, predict):
         if target is None:
-            target = x[: self.pivot]
+            if predict is False:
+                return x[-1:]
+            return x
+        
+        # if predict:
+        #     return np.concatenate((target[:], x[:]))
 
-        return np.concatenate((target[: 1 - self.pivot], x[: self.pivot]))
+        return np.concatenate((target, x))
 
     def pred_concat(self, target, y):
         if target is None:
