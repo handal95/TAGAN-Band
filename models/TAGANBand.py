@@ -14,7 +14,7 @@ from utils.loss import GANLoss
 from utils.logger import Logger
 from utils.device import init_device
 from utils.dashboard import Dashboard
-from utils.dataset_v2 import TimeseriesDataset
+from utils.dataset import TAGANDataset
 from utils.metric import metric_NMAE
 
 logger = Logger(__file__)
@@ -31,16 +31,15 @@ class TAGANBand:
 
     """
 
-    def __init__(self, config=None):
+    def __init__(self, config: dict = None) -> None:
         # Set device
         self.device = init_device()
-        logger.info(f"Device setting - {self.device}")
 
-        # Config option
+        # Set Config
         config = self.set_config(config=config)
 
         # Dataset option
-        self.dataset = TimeseriesDataset(config=self.dataset_config)
+        self.dataset = TAGANDataset(self.dataset_config, device=self.device)
         self.dataloader = self.init_dataloader(self.dataset)
 
         # Model option
@@ -52,7 +51,7 @@ class TAGANBand:
         self.shape = self.dataset.shape
         self.in_dim = self.dataset.in_dim
 
-    def set_config(self, config=None):
+    def set_config(self, config: dict = None) -> dict:
         """
         Setting configuration
 
@@ -60,12 +59,10 @@ class TAGANBand:
         Use default config 'config.yml'
         """
         if config is None:
-            logger.info(
-                "Config Setting - JSON config is not entered, Use Default settings"
-            )
+            logger.info("  Config : Default configs")
             config = load_yaml()
         else:
-            logger.info("Loaded JSON configuration")
+            logger.info("  Config : JSON configs")
 
         # Configuration Categories
         self.dataset_config = config["dataset"]
@@ -116,7 +113,7 @@ class TAGANBand:
 
     def init_model(self):
         netG, netD = self.load_model(self.load)
-        
+
         # Set Oprimizer
         self.optimizerD = optim.RMSprop(netD.parameters(), lr=self.lr * self.lr_gammaD)
         self.optimizerG = optim.RMSprop(netG.parameters(), lr=self.lr * self.lr_gammaG)
@@ -150,7 +147,9 @@ class TAGANBand:
         netG = LSTMGenerator(
             in_dim, out_dim=out_dim, hidden_dim=hidden_dim, device=device
         ).to(device)
-        netD = LSTMDiscriminator(in_dim, hidden_dim=hidden_dim, device=device).to(device)
+        netD = LSTMDiscriminator(in_dim, hidden_dim=hidden_dim, device=device).to(
+            device
+        )
         return (netG, netD)
 
     def train(self):
@@ -159,7 +158,14 @@ class TAGANBand:
         dashboard = Dashboard(self.dataset)
         for epoch in range(self.iter_epochs):
             tqdm_dataset = tqdm(self.dataloader)
-            losses = {"G": 0.0, "D": 0.0, "l1": 0.0, "l2": 0.0, "GP": 0.0, "Score:": 0.0}
+            losses = {
+                "G": 0.0,
+                "D": 0.0,
+                "l1": 0.0,
+                "l2": 0.0,
+                "GP": 0.0,
+                "Score:": 0.0,
+            }
             for i, (data) in enumerate(tqdm_dataset):
                 for critic in range(self.iter_critic):
                     y, x = self.bander.get_random_sample(self.netG)
@@ -205,11 +211,10 @@ class TAGANBand:
                 errG.backward(retain_graph=True)
                 self.optimizerG.step()
 
-
                 true = self.bander.variables(x)
                 y = self.bander.get_sample(x, self.netG)
                 pred = self.bander.variables(y)
-                
+
                 score = metric_NMAE(pred, true)
 
                 losses["G"] += err_G
@@ -221,23 +226,25 @@ class TAGANBand:
 
                 # Print loss
                 if self.print_verbose > 0:
-                    tqdm_dataset.set_postfix({
-                        'Epoch': epoch + 1,
-                        'Score': f'{losses["Score"]:2.4f}',
-                        'D': f'{losses["D"]:2.4f}',
-                        'G': f'{losses["G"]:2.4f}',
-                        'L1': f'{losses["l1"]:2.4f}',
-                        'L2': f'{losses["l2"]:2.4f}',
-                        'GP': f'{losses["GP"]:2.4f}',
-                        # 'Score': '{:06f}'.format(batch_score.item()),
-                        # 'Total Score' : '{:06f}'.format(total_score/(batch+1)),
-                    })
+                    tqdm_dataset.set_postfix(
+                        {
+                            "Epoch": epoch + 1,
+                            "Score": f'{losses["Score"]:2.4f}',
+                            "D": f'{losses["D"]:2.4f}',
+                            "G": f'{losses["G"]:2.4f}',
+                            "L1": f'{losses["l1"]:2.4f}',
+                            "L2": f'{losses["l2"]:2.4f}',
+                            "GP": f'{losses["GP"]:2.4f}',
+                            # 'Score': '{:06f}'.format(batch_score.item()),
+                            # 'Total Score' : '{:06f}'.format(total_score/(batch+1)),
+                        }
+                    )
 
                 # Visualize
-                
+
                 if self.visual is True and (epoch) % 10 == 0:
                     dashboard.train_vis(pred)
-                
+
             if self.save is True and (epoch + 1) % 10 == 0:
                 logger.info("Model is saved")
                 model_path = os.path.join(self.model_path, self.model_tag)
@@ -248,7 +255,7 @@ class TAGANBand:
                 netG_path = os.path.join(model_path, "netG.pth")
                 torch.save(self.netD, netD_path)
                 torch.save(self.netG, netG_path)
-                
+
         # input()
 
     def run(self):
@@ -306,7 +313,7 @@ class TAGANBand:
         logger.info(f"\n{self._loss_message()}")
 
     def get_labels(self, text=False):
-        origin = self.dataset.origin
+        origin = self.dataset.data
         pred = self.bander.pred
         median = self.bander.bands["median"]
         pred[: len(median)] = median
