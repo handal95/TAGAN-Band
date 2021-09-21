@@ -18,7 +18,7 @@ class Dashboard:
         self.area_upper = None
         self.area_lower = None
         self.time = self.initialize(dataset.time)
-        self.scope = 480
+        self.scope = 1316
         self.idx = 0
 
         self.detects = list()
@@ -53,11 +53,12 @@ class Dashboard:
         
         return self.fig
 
-    def train_vis(self, origins):
+    def train_vis(self, data):
         fig, ax = self.reset_figure()
+        start = max(self.seq_len, len(data) - self.scope + 1)
 
-        for i in range(1, 43):
-            ax.plot(origins[:, i], alpha=1, label=f"Column{i} data")
+        for i in range(1, 20):
+            ax.plot(data[start:, i], alpha=1, label=f"Column{i} data")
         
         # # Fill Background Valid Area
         # plt.fill_between(
@@ -69,7 +70,12 @@ class Dashboard:
         # )
 
         # # Set Y limit by min-max
-        # plt.ylim(self.dataset.min, self.dataset.max)
+        # plt.ylim(self.dataset.min, self.dataset.max
+        xtick = np.arange(0, self.scope, 20)
+        # values = self.time[start : start + self.scope : 24]
+
+        plt.xticks(xtick, rotation=30)
+        plt.legend()
 
         self.show_figure()
 

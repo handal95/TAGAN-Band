@@ -15,6 +15,7 @@ from utils.logger import Logger
 from utils.device import init_device
 from utils.dashboard import Dashboard
 from utils.dataset_v2 import TimeseriesDataset
+from utils.metric import metric_NMAE
 
 logger = Logger(__file__)
 
@@ -135,8 +136,8 @@ class TAGANBand:
 
         if load_option is True:
             logger.info("Loading Pretrained Models..")
-            netG_path = os.path.join(self.model_path, f"netG_{self.model_tag}.pth")
-            netD_path = os.path.join(self.model_path, f"netD_{self.model_tag}.pth")
+            netG_path = os.path.join(self.model_path, f"{self.model_tag}/netG.pth")
+            netD_path = os.path.join(self.model_path, f"{self.model_tag}/netD.pth")
 
             if os.path.exists(netG_path) and os.path.exists(netD_path):
                 logger.info(f" - Loaded net D : {netD_path}, net G: {netG_path}")
@@ -147,7 +148,7 @@ class TAGANBand:
                 )
 
         netG = LSTMGenerator(
-            in_dim, out_dim=in_dim, hidden_dim=hidden_dim, device=device
+            in_dim, out_dim=out_dim, hidden_dim=hidden_dim, device=device
         ).to(device)
         netD = LSTMDiscriminator(in_dim, hidden_dim=hidden_dim, device=device).to(device)
         return (netG, netD)
@@ -157,9 +158,9 @@ class TAGANBand:
 
         dashboard = Dashboard(self.dataset)
         for epoch in range(self.iter_epochs):
-            tqdm_dataset = tqdm(enumerate(self.dataloader))
-            losses = {"G": 0.0, "D": 0.0, "l1": 0.0, "l2": 0.0, "GP": 0.0}
-            for i, (data) in tqdm_dataset:
+            tqdm_dataset = tqdm(self.dataloader)
+            losses = {"G": 0.0, "D": 0.0, "l1": 0.0, "l2": 0.0, "GP": 0.0, "Score:": 0.0}
+            for i, (data) in enumerate(tqdm_dataset):
                 for critic in range(self.iter_critic):
                     y, x = self.bander.get_random_sample(self.netG)
 
@@ -204,21 +205,25 @@ class TAGANBand:
                 errG.backward(retain_graph=True)
                 self.optimizerG.step()
 
-                origins = self.bander.variables(x)
-                # origin = self.bander.single_process(x)
+
+                true = self.bander.variables(x)
                 y = self.bander.get_sample(x, self.netG)
-                # predict = self.bander.single_process(y, predict=True)
+                pred = self.bander.variables(y)
+                
+                score = metric_NMAE(pred, true)
 
                 losses["G"] += err_G
                 losses["D"] += errD
                 losses["l1"] += err_l1
                 losses["l2"] += err_l2
                 losses["GP"] += err_gp
+                losses["Score"] = score
 
                 # Print loss
-                if self.print_verbose > 5:
+                if self.print_verbose > 0:
                     tqdm_dataset.set_postfix({
                         'Epoch': epoch + 1,
+                        'Score': f'{losses["Score"]:2.4f}',
                         'D': f'{losses["D"]:2.4f}',
                         'G': f'{losses["G"]:2.4f}',
                         'L1': f'{losses["l1"]:2.4f}',
@@ -229,8 +234,21 @@ class TAGANBand:
                     })
 
                 # Visualize
-                dashboard.train_vis(origins)
+                
+                if self.visual is True and (epoch) % 10 == 0:
+                    dashboard.train_vis(pred)
+                
+            if self.save is True and (epoch + 1) % 10 == 0:
+                logger.info("Model is saved")
+                model_path = os.path.join(self.model_path, self.model_tag)
+                if not os.path.exists(model_path):
+                    os.mkdir(model_path)
 
+                netD_path = os.path.join(model_path, "netD.pth")
+                netG_path = os.path.join(model_path, "netG.pth")
+                torch.save(self.netD, netD_path)
+                torch.save(self.netG, netG_path)
+                
         # input()
 
     def run(self):

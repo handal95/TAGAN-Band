@@ -44,7 +44,8 @@ class TimeseriesDataset:
         self.title = config["data"]
         self.workers = config["workers"]
         self.key = config["key"]
-        self.weekofday = config["weekofday"]
+        self.weekday = config["weekday"]
+        self.skip_weekend = config["skip_weekend"]
 
         self.stride = config["stride"]
         self.seq_len = config["seq_len"]
@@ -66,33 +67,33 @@ class TimeseriesDataset:
         _path_checker(self.data_path, force=True)
 
         data = pd.read_csv(self.data_path)
+        data[self.key] = pd.to_datetime(data[self.key])
 
-        if self.weekofday in data.columns:
-            data[self.weekofday] = one_hot_encoding(data[self.weekofday])
+        if self.weekday in data.columns:
+            data[self.weekday] = one_hot_encoding(data[self.weekday])
+            if self.skip_weekend is True:
+                data = data[data[self.key].dt.dayofweek < 6]
 
         data = data.set_index(self.key)
-        # Labeling missing values (and known anomalies)
-        # data = data.interpolate(method="time")
-
+        
         return data
 
     def split_data(self, data):
         if self.train_option is False:
-            return (data, None, None)
-
-        logger.info(
-            f"Data Split >> "
-            f"(Train: {self.split_rate['train']}, "
-            f"Valid: {self.split_rate['valid']})"
-        )
+            return (data, None)
 
         self.train_idx = int(len(data) * (self.split_rate["train"]))
         self.valid_idx = self.train_idx + int(len(data) * (self.split_rate["valid"]))
 
         train_set = data[: self.valid_idx]
-        test_set = data[self.valid_idx :]
+        valid_set = data[self.valid_idx :]
 
-        return (train_set, test_set)
+        logger.info(
+            f"Data Split >> {self.split_rate['train']},  {self.split_rate['valid']} \n"
+            f"(Train: {train_set.shape}, Valid: {valid_set.shape})"
+        )
+
+        return (train_set, valid_set)
 
     def labeling(self, data, label, anomalies):
         data, missings = self.check_missing_value(data)
@@ -188,11 +189,11 @@ class TimeseriesDataset:
         if not hasattr(self, "max") or not hasattr(self, "min"):
             raise Exception("Try to denormalize, but the input was not normalized")
         
-        for batch in range(self.batch_size):
+        for batch in range(data.shape[0]):
             data[batch, :, 1:] = 0.5 * data[batch, :, 1:] + 1
             data[batch, :, 1:] = data[batch, :, 1:] * (self.max - self.min)
             data[batch, :, 1:] = data[batch, :, 1:] + self.min
-
+            
         return data
 
     def __len__(self):

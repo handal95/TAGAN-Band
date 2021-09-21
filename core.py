@@ -9,7 +9,10 @@ torch.set_printoptions(precision=4)
 np.set_printoptions(linewidth=np.inf, precision=6, suppress=True)
 
 
-def use_default_config(path="config/config.json"):
+def use_default_config(path:os.path="config/config.json"):
+    """
+    User Default Configuration settings
+    """
     if os.path.exists(path):
         with open(path) as f:
             config = json.load(f)
@@ -17,7 +20,6 @@ def use_default_config(path="config/config.json"):
 
 
 if __name__ == "__main__":
-
     # Argument options - JSON
     config = None
 

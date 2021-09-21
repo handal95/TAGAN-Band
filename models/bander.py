@@ -44,7 +44,7 @@ class TAGAN_Bander:
         
     def variables(self, data):
         batch_size = data.size(0)
-        data = data.cpu().detach()
+        data = self._denormalize(data).cpu().detach()
 
         if self.mdata is None:
             self.mdata = data[0, :0, :]
