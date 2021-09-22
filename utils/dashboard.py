@@ -8,7 +8,7 @@ class Dashboard:
     def __init__(self, dataset):
         super(Dashboard).__init__()
         self.dataset = dataset
-        self.seq_len = dataset.seq_len
+        self.seq_len = dataset.window_len
 
         self.fig, self.ax = self.init_figure()
 
@@ -50,7 +50,7 @@ class Dashboard:
         self.fig.show()
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
-        
+
         return self.fig
 
     def train_vis(self, data):
@@ -59,7 +59,7 @@ class Dashboard:
 
         for i in range(1, 20):
             ax.plot(data[start:, i], alpha=1, label=f"Column{i} data")
-        
+
         # # Fill Background Valid Area
         # plt.fill_between(
         #     (self.dataset.train_idx, self.dataset.valid_idx),

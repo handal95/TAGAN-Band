@@ -18,6 +18,28 @@ MISSING = -1.0
 ANOMALY = 1.0
 
 
+class Dataset:
+    def __init__(self, encoder, decoder):
+        self.encoder = encoder[0]
+        self.encoder_future = encoder[1]
+
+        self.decoder = decoder[0]
+        self.decoder_future = decoder[1]
+
+        self.length = len(self.encoder)
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, idx):
+        return {
+            "encoder": torch.tensor(self.encoder[idx], dtype=torch.float32),
+            "decoder": torch.tensor(self.decoder[idx], dtype=torch.float32),
+            "enc_future": torch.tensor(self.encoder_future[idx], dtype=torch.float32),
+            "dec_future": torch.tensor(self.decoder_future[idx], dtype=torch.float32),
+        }
+
+
 class TAGANDataset:
     def __init__(self, config, device):
         logger.info("  Dataset: ")
@@ -28,16 +50,15 @@ class TAGANDataset:
         self.set_config(config)
 
         # Load Data
-        x_data, y_data = self.load_data()
+        (x_train, x_valid), (y_train, y_valid) = self.load_data()
 
-        # data = self.train
-        self.time = self.store_times(self.data)
-        # self.data = self.store_values(data, normalize=True)
-        # self.label = self.store_values(label, normalize=False)
-
-        self.in_dim = x_data[0].shape[2]
+        self.time = self.store_times()
+        self.in_dim = x_train[0].shape[2]
         self.data_len = len(self.data)
         self.shape = (self.batch_size, self.window_len, self.in_dim)
+
+        self.train_dataset = Dataset(x_train, y_train)
+        self.valid_dataset = Dataset(x_valid, y_valid)
 
     def set_config(self, config):
         self.title = config["data"]
@@ -87,7 +108,7 @@ class TAGANDataset:
         # Weekday encoding
         if self.weekday in data.columns:
             data[self.weekday] = one_hot_encoding(data[self.weekday])
-        data = data.set_index(self.key)
+        self.origin = data = data.set_index(self.key)
 
         # Normalize
         logger.info(f"  - Scaler : Min-Max")
@@ -95,11 +116,11 @@ class TAGANDataset:
 
         # X Y Split - Custom for dataset
         x_data = data.iloc[:, :]
-        y_data = data.iloc[:, 3::2]
+        y_data = data.iloc[:, 2::2]
 
         # Windowing
-        x_data = self.windowing(x_data)
-        y_data = self.windowing(y_data)
+        x_data, x_future = self.windowing(x_data)
+        y_data, y_future = self.windowing(y_data)
 
         # When the train option is on, split train and valid data
         if self.train_option:
@@ -108,11 +129,20 @@ class TAGANDataset:
             valid_idx = int(len(data) * split_rate)
             x_train = x_data[: -valid_idx - self.future_len]
             y_train = y_data[: -valid_idx - self.future_len]
+            xf_train = x_future[: -valid_idx - self.future_len]
+            yf_train = y_future[: -valid_idx - self.future_len]
+
             x_valid = x_data[-valid_idx:]
             y_valid = y_data[-valid_idx:]
-            return (x_train, x_valid), (y_train, y_valid)
+            xf_valid = x_future[-valid_idx:]
+            yf_valid = y_future[-valid_idx:]
 
-        return (x_data, None), (y_data, None)
+            return (
+                ((x_train, xf_train), (x_valid, xf_valid)),
+                ((y_train, yf_train), (y_valid, yf_valid)),
+            )
+
+        return ((x_data, x_future), (None, None)), ((y_data, y_future), (None, None))
 
     def check_missing_value(self, data):
         # TODO : Need Refactoring
@@ -144,9 +174,9 @@ class TAGANDataset:
 
         return data, missings
 
-    def store_times(self, data):
-        time = pd.to_datetime(data.index)
-        time = time.strftime("%y%m%d:%H%M")
+    def store_times(self):
+        time = pd.to_datetime(self.origin.index)
+        time = time.strftime("%y-%m-%d:%H:%M")
         time = time.values
         return time
 
@@ -162,10 +192,20 @@ class TAGANDataset:
         return data
 
     def windowing(self, x):
-        stop = len(x) - self.window_len
-        output = [x[i : i + self.window_len] for i in range(0, stop, self.stride)]
-        output = np.array(output)
-        return output
+        stop = len(x) - self.window_len - self.future_len
+
+        data = []
+        target = []
+        for i in range(0, stop, self.stride):
+            j = i + self.window_len
+
+            data.append(x[i : i + self.window_len])
+            target.append(x[j : j + self.future_len])
+
+        data = np.array(data)
+        target = np.array(target)
+
+        return data, target
 
     def normalize(self, data):
         """Normalize input in [-1,1] range, saving statics for denormalization"""
@@ -177,15 +217,22 @@ class TAGANDataset:
         data.iloc[:, 1:] = data.iloc[:, 1:] / (self.max - self.min)
         data.iloc[:, 1:] = 2 * data.iloc[:, 1:] - 1
 
+        self.decoder_max = torch.tensor(self.max[1::2])
+        self.decoder_min = torch.tensor(self.min[1::2])
         self.max = torch.tensor(self.max)
         self.min = torch.tensor(self.min)
 
         # print("-----  Min Max information  -----")
         # df_minmax = pd.DataFrame({
-        #     'MIN': self.min,
-        #     'MAX': self.max
+        #     'min': self.min[:10],
+        #     'max': self.max[:10],
+        # })
+        # df_minmax2 = pd.DataFrame({
+        #     'MIN': self.decoder_min[:10],
+        #     'MAX': self.decoder_max[:10]
         # })
         # print(df_minmax.T)
+        # print(df_minmax2.T)
 
         return data
 
@@ -194,10 +241,24 @@ class TAGANDataset:
         if not hasattr(self, "max") or not hasattr(self, "min"):
             raise Exception("Try to denormalize, but the input was not normalized")
 
+        delta = self.max - self.min
         for batch in range(data.shape[0]):
-            data[batch, :, 1:] = 0.5 * data[batch, :, 1:] + 1
-            data[batch, :, 1:] = data[batch, :, 1:] * (self.max - self.min)
+            data[batch, :, 1:] = 0.5 * (data[batch, :, 1:] + 1)
+            data[batch, :, 1:] = data[batch, :, 1:] * delta
             data[batch, :, 1:] = data[batch, :, 1:] + self.min
+
+        return data
+
+    def decoder_denormalize(self, data):
+        """Revert [-1,1] normalization"""
+        if not hasattr(self, "max") or not hasattr(self, "min"):
+            raise Exception("Try to denormalize, but the input was not normalized")
+
+        delta = self.decoder_max - self.decoder_min
+        for batch in range(data.shape[0]):
+            data[batch, :, :] = 0.5 * (data[batch, :, :] + 1)
+            data[batch, :, :] = data[batch, :, :] * delta
+            data[batch, :, :] = data[batch, :, :] + self.decoder_min
 
         return data
 
@@ -205,7 +266,7 @@ class TAGANDataset:
         return self.data_len
 
     def __getitem__(self, idx):
-        return self.data[idx]
+        return self.train_dataset[idx]
 
 
 def _path_checker(path, force=False):
