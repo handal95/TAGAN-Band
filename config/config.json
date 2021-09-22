@@ -3,14 +3,18 @@
         "path": "data\\",
         "data": "agricultural_product",
         "key": "date",
-        "weekofday": "weekofday",
+        "weekday": "weekday",
+        "skip_weekend": true,
 
         "workers": 2,
-        "stride": 1,
-
         "batch_size": 16,
-        "seq_len": 18,
+
+        "stride": 1,
+        "window_len": 28,
+        "future_len": 28,
+
         "hidden_dim": 256,
+        "target_dim": 21,
         "train": {
             "opt": true,
             "train_rate": 0.8,
@@ -20,15 +24,15 @@
     },
     "model": {
         "path": "models/pretrained/",
-        "save": false,
+        "save": true,
         "load": true,
-        "interval": 100,
-        "tag": "10000"
+        "interval": 10,
+        "tag": "encdec-multi"
     },    
     "train": {
         "epochs": {
-            "base": 0,
-            "iter": 1000,
+            "base": 100,
+            "iter": 1600,
             "critic": 5
         },
         "learning_rate": {
@@ -37,8 +41,8 @@
             "gammaG": 0.5
         },
         "bander":{
-            "pivot": 6,
-            "gp_weight": 1,
+            "window_len": 4,
+            "gp_weight": 10,
             "l1_gamma": 1,
             "l2_gamma": 1,
             "sigmas": {
