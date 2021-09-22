@@ -34,14 +34,14 @@ class TAGAN_Bander:
         self.replace = None
 
     def set_config(self, config):
-        self.pivot = config["pivot"]
+        self.window_len = config["window_len"]
         self.gp_weight = config["gp_weight"]
         self.l1_gamma = config["l1_gamma"]
         self.l2_gamma = config["l2_gamma"]
 
         sigma = config["sigmas"]
         self.sigmas = [sigma["inner"], sigma["normal"], sigma["warning"]]
-        
+
     def variables(self, data):
         batch_size = data.size(0)
         data = self._denormalize(data).cpu().detach()
@@ -53,7 +53,6 @@ class TAGAN_Bander:
             self.mdata = np.concatenate((self.mdata, data[batch, :1, :]))
 
         return self.mdata
-        
 
     def single_process(self, data, normalized=True, predict=False):
         if normalized:
@@ -71,9 +70,9 @@ class TAGAN_Bander:
 
     # def pred_concat(self, data, normalized=True):
     #     if target is None:
-    #         target = x[: self.pivot]
+    #         target = x[: self.window_len]
 
-    #     return np.concatenate((target[: 1 - self.pivot], x[: self.pivot]))
+    #     return np.concatenate((target[: 1 - self.window_len], x[: self.window_len]))
 
     def process(self, x, y, label, normalized=True):
         if normalized:
@@ -83,13 +82,13 @@ class TAGAN_Bander:
 
         if self.bands["init"] is False:
             self.bands["init"] = True
-            self.bands["median"] = x[: self.pivot]
+            self.bands["median"] = x[: self.window_len]
             for i in range(3):
-                self.bands["upper"][i] = x[: self.pivot]
-                self.bands["lower"][i] = x[: self.pivot]
+                self.bands["upper"][i] = x[: self.window_len]
+                self.bands["lower"][i] = x[: self.window_len]
 
         std = y.std()
-        median = np.median(y[self.pivot + 1 :])
+        median = np.median(y[self.window_len + 1 :])
 
         self.bands["median"] = np.append(self.bands["median"], median)
         for i in range(3):
@@ -109,13 +108,13 @@ class TAGAN_Bander:
 
     def detecting(self, ypos, label):
         # Analized Unlabeled points
-        pivot = self.pivot
+        window_len = self.window_len
         xpos = len(self.data) - 1
 
-        if True in np.isin(label[pivot], [MISSING]):
+        if True in np.isin(label[window_len], [MISSING]):
             self.detects["labeled"].append((xpos, "black"))
 
-        elif True in np.isin(label[pivot], [ANOMALY]):
+        elif True in np.isin(label[window_len], [ANOMALY]):
             self.detects["labeled"].append((xpos, "red"))
 
         for i in range(1, 3):
@@ -130,26 +129,24 @@ class TAGAN_Bander:
             x = x.cpu().detach()
         return self.dataset.denormalize(x)
 
-    def get_sample(self, x, netG):
-        shape = (x.size(0), x.size(1), x.size(2))
-
-        z = torch.randn(shape).to(self.device)
-        if self.pivot > 0:
-            z[:, : self.pivot, :] = x[:, : self.pivot, :]
-
-        y = netG(z).to(self.device)
+    def get_sample(self, x, y, netG):
+        y = netG(x).to(self.device)
         return y
 
     def get_random_sample(self, netG):
         idx = np.random.randint(self.dataset.shape)
-        x = self.dataset[idx]
+        data = self.dataset[idx]
 
-        x = x.to(self.device)
-        y = self.get_sample(x, netG)
+        x_window = data["encoder"].to(self.device)
+        y_window = data["decoder"].to(self.device)
+        x_future = data["enc_future"].to(self.device)
+        y_future = data["dec_future"].to(self.device)
 
-        return y, x
+        y_generate = self.get_sample(x_window, y_future, netG)
 
-    def impute_missing_value(self, x, y, label, pivot):
+        return y_generate, y_window
+
+    def impute_missing_value(self, x, y, label, window_len):
         # TODO : Need to refactoring
         if self.check_missing(label):
             if self.replace is None:
@@ -160,7 +157,7 @@ class TAGAN_Bander:
             if self.check_missing(label, latest=True):
                 y_ = y.cpu().detach().numpy()
                 m = np.median(y_[:, :, :], axis=1)
-                std = y_[:, pivot:, :].std()
+                std = y_[:, window_len:, :].std()
                 y = np.random.normal(m, std / 2, y.shape)
                 self.replace[:, -1:] = torch.Tensor(y[:, -1:, :])
             else:
@@ -192,5 +189,5 @@ class TAGAN_Bander:
         if target is None:
             target = y
 
-        length = len(target) - self.dataset.seq_len + self.pivot
-        return np.concatenate((target[: length + 1], y[self.pivot :]))
+        length = len(target) - self.dataset.seq_len + self.window_len
+        return np.concatenate((target[: length + 1], y[self.window_len :]))

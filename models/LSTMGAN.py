@@ -2,13 +2,6 @@ import torch
 import torch.nn as nn
 
 
-class GAN:
-    def __init__(self, netD, netG):
-        super.__init__()
-        self.netD = netD
-        self.netG = netG
-
-
 class LSTMGenerator(nn.Module):
     """An LSTM based generator. It expects a sequence of noise vectors as input.
 
