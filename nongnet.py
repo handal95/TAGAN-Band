@@ -20,7 +20,7 @@ today = datetime.datetime.today()
 
 try:
     basedir = "Nongnet"
-    for delta in range(1950, 2000):
+    for delta in range(2455, 2460, 1):
         print(f"***** {delta} *****")
         date = (today - datetime.timedelta(delta)).strftime('%Y%m%d')
         print(date)

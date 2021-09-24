@@ -21,8 +21,8 @@ class TAGAN_Metric:
         return self.criterion_adv(D, target_is_real)
 
     def NMAE(self, pred, true):
-        # pred = pred[:, [6, 13]]
-        # true = true[:, [6, 13]]
+        # pred = pred[:, [6, 13, 27]]
+        # true = true[:, [6, 13, 27]]
         pred, true = self._ignore_zero(pred, true)
 
         if len(true) == 0:

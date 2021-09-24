@@ -29,7 +29,7 @@ class Dashboard_v2:
         NROWS = 1 + (self.decode_dim - 1) // self.feature_by_rows
 
         fig, ax = plt.subplots(
-            NROWS, 1, figsize=(20, 10), facecolor="lightgray", sharex=True,sharey=True
+            NROWS, 1, figsize=(20, 10), facecolor="lightgray", sharex=True,
         )
         fig.tight_layout()
 
@@ -61,27 +61,31 @@ class Dashboard_v2:
 
     def visualize(self, window, true, pred) -> None:
         # Clear figure
-        fig, ax = self.reset_figure()
 
         # self.true_data, self.pred_data = self.data_concat(true, pred)
 
         true = true[0].cpu()
-        for i, ax_ in enumerate(ax):
-            REAL_GRAPH = np.concatenate([self.true_data, true])
-            ax_.plot(REAL_GRAPH, color="k", alpha=0.5, linewidth=1)
-
-            batch_size = window.shape[0]
-            for batch in range(batch_size - 1, batch_size):
-                preds = pred[batch].cpu().detach().numpy()
-                graph = np.concatenate([self.pred_list[batch - batch_size], preds[:]])
-                ax_.plot(graph, alpha=1, linewidth=1, label=f"{batch}")
-            # Legend
-            ax_.legend(loc="upper left")
-            plt.ylim(0, 10000)
-
-        # # Set Y limit by min-max
-        # Show updated figure
-        self.show_figure()
+        REAL_GRAPH = np.concatenate([self.true_data, true])
+        
+        batch_size = int(window.shape[0])
+        for b in range(batch_size):
+            fig, ax = self.reset_figure()
+            
+            upto = self.window_len + b
+            preds = pred[b].cpu().detach().numpy()
+            PRED_GRAPH = np.concatenate([self.pred_list[b], preds])
+            for i, ax_ in enumerate(ax):
+                idx_s = i * self.feature_by_rows
+                idx_e = min((i + 1) * self.feature_by_rows, len(self.target_col))
+                for f in range(idx_s, idx_e):
+                    ax_.plot(REAL_GRAPH[:upto, f], color=f"C{f}", alpha=0.2, linewidth=3, label=f"Real {self.target_col[f]}")
+                    ax_.plot(PRED_GRAPH[:upto, f], color=f"C{f}", alpha=1, linewidth=1, label=f"Fake {self.target_col[f]}")
+                # # Legend
+                ax_.legend(loc="upper left")
+            # # Set Y limit by min-max
+            # Show updated figure
+            self.show_figure()
+            plt.pause(0.01)
 
         # self.true_data, self.pred_data = self.data_concat(true, pred)
 

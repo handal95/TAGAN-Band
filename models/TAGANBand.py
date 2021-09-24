@@ -159,7 +159,7 @@ class TAGANBand:
         valid_score_plot = []
 
         BEST_COUNT = 20
-        BEST_SCORE = 0.32
+        BEST_SCORE = 0.27
 
         EPOCHS = self.base_epochs + self.iter_epochs
         for epoch in range(self.base_epochs, EPOCHS):
@@ -179,7 +179,7 @@ class TAGANBand:
                 if ((epoch + 1) % self.save_interval) == 0:
                     logger.info(
                         f"[Epoch {epoch + 1:4d}]*** MODEL IS SAVED ***"
-                        f"(T{train_score:.4f}, V {valid_score:.4f})"
+                        f"(T {train_score:.4f}, V {valid_score:.4f})"
                     )
                     if not os.path.exists(model_path):
                         os.mkdir(model_path)
@@ -190,6 +190,7 @@ class TAGANBand:
                 # Best Model save
                 if valid_score < BEST_SCORE:
                     BEST_SCORE = valid_score
+                    BEST_COUNT = 20
                     logger.info(f"*** BEST SCORE MODEL ({BEST_SCORE:.4f}) IS SAVED ***")
                     self.save_model(model_path, postfix=f"_{BEST_SCORE:.4f}")
                 else:
@@ -356,22 +357,6 @@ class TAGAN_Trainer:
 
         self.visual = False
 
-    def critic(self):
-        # Critic
-        for _ in range(self.iter_critic):
-            y, x = self.bander.get_random_sample(self.netG)
-
-            Dx = self.netD(x)
-            Dy = self.netD(y)
-            self.optimizerD.zero_grad()
-
-            loss_GP = self.metric.grad_penalty(y, x)
-            loss_D_ = Dy.mean() - Dx.mean()
-
-            loss_D = loss_D_ + loss_GP
-            loss_D.backward()
-            self.optimizerD.step()
-
     def train_step(self, tqdm, epoch, training=True):
         TAG = "Train" if training else "Valid"
         losses = {"G": 0, "D": 0, "l1": 0, "l2": 0, "GP": 0, "Score": 0}
@@ -383,8 +368,10 @@ class TAGAN_Trainer:
         for i, data in enumerate(tqdm):
             x_window = data["encoder"].to(self.device)
             y_window = data["decoder"].to(self.device)
+            a_window = data["answer"].to(self.device)
             x_future = data["enc_future"].to(self.device)
             y_future = data["dec_future"].to(self.device)
+            a_future = data["ans_future"].to(self.device)
 
             # Critic
             if training:
@@ -431,9 +418,9 @@ class TAGAN_Trainer:
                 self.optimizerG.step()
 
             # Scoring
-            y_window = self.dataset.decoder_denormalize(y_window.cpu())
-            true = self.dataset.decoder_denormalize(y_future.cpu())
-            pred = self.dataset.decoder_denormalize(y_gen.cpu())
+            window = a_window.cpu()
+            true = a_future.cpu()
+            pred = self.dataset.denormalize(y_gen.cpu())
             
             score = self.metric.NMAE(pred, true).detach().numpy()
 
@@ -447,8 +434,8 @@ class TAGAN_Trainer:
 
             tqdm.set_description(loss_info(TAG, epoch, losses, i))
             if not training and self.visual is True:
-                self.dashboard.initalize(y_window)
-                self.dashboard.visualize(y_window, true, pred)
+                self.dashboard.initalize(window)
+                self.dashboard.visualize(window, true, pred)
 
         if not training:
             if ((epoch + 1) % self.print_interval) == 0:
@@ -461,7 +448,7 @@ class TAGAN_Trainer:
                         "pred": pred_info,
                         "diff": diff_info,
                         "perc": 100 * diff_info / true_info,
-                    }
+                    }, index=self.dataset.targets
                 )
                 logger.info(
                     f"-----  Result (e{epoch + 1:4d})  -----"

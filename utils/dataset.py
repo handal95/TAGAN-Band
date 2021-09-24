@@ -17,13 +17,15 @@ ANOMALY = 1.0
 
 
 class Dataset:
-    def __init__(self, encoder, decoder):
+    def __init__(self, encoder, decoder, answer):
         self.encoder = encoder[0]
         self.encoder_future = encoder[1]
 
         self.decoder = decoder[0]
         self.decoder_future = decoder[1]
 
+        self.answer = answer[0]
+        self.answer_future = answer[1]
         self.length = len(self.encoder)
 
     def __len__(self):
@@ -33,8 +35,10 @@ class Dataset:
         return {
             "encoder": torch.tensor(self.encoder[idx], dtype=torch.float32),
             "decoder": torch.tensor(self.decoder[idx], dtype=torch.float32),
+            "answer": torch.tensor(self.answer[idx], dtype=torch.float32),
             "enc_future": torch.tensor(self.encoder_future[idx], dtype=torch.float32),
             "dec_future": torch.tensor(self.decoder_future[idx], dtype=torch.float32),
+            "ans_future": torch.tensor(self.answer_future[idx], dtype=torch.float32),
         }
 
 
@@ -59,12 +63,12 @@ class TAGANDataset:
         self.device = device
 
         # Load Data
-        (x_train, x_valid), (y_train, y_valid) = self.load_data()
+        (x_train, x_valid), (y_train, y_valid), (a_train, a_valid)= self.load_data()
 
         logger.info(f"  - Train  : {x_train[0].shape}, {y_train[1].shape}")
         logger.info(f"  - Valid  : {x_valid[0].shape}, {y_valid[1].shape}")
-        self.train_dataset = Dataset(x_train, y_train)
-        self.valid_dataset = Dataset(x_valid, y_valid)
+        self.train_dataset = Dataset(x_train, y_train, a_train)
+        self.valid_dataset = Dataset(x_valid, y_valid, a_valid)
 
         # Feature info
         self.shape      = y_train[0].shape
@@ -115,9 +119,9 @@ class TAGANDataset:
         logger.info(f"  - Length : {self.length}")
 
         self.data = data
-        x_data, y_data = self.preprocess(data)
+        x_data, y_data, a_data = self.preprocess(data)
 
-        return x_data, y_data
+        return x_data, y_data, a_data
 
     def preprocess(self, data: pd.DataFrame) -> typing.Tuple:
         logger.info(f"  - Index  : {self.key}")
@@ -140,6 +144,7 @@ class TAGANDataset:
         
         # Normalize
         logger.info(f"  - Scaler : Min-Max")
+        answer = data[self.targets].copy()
         data = self.normalize(data)
 
         month_encode = one_hot(month_data)
@@ -152,9 +157,10 @@ class TAGANDataset:
         y_data = data[self.targets]
         
         # Windowing
+        a_data, a_future = self.windowing(answer)
         x_data, x_future = self.windowing(x_data)
         y_data, y_future = self.windowing(y_data)
-
+        
         # When the train option is on, split train and valid data
         if self.train_option:
             split_idx = max(int(len(data) * self.split_rate), self.future_len + 1)
@@ -162,20 +168,30 @@ class TAGANDataset:
 
             x_train = x_data[:split_idx - self.future_len]
             y_train = y_data[:split_idx - self.future_len]
+            a_train = a_data[:split_idx - self.future_len]
             xf_train = x_future[:split_idx - self.future_len]
             yf_train = y_future[:split_idx - self.future_len]
+            af_train = a_future[:split_idx - self.future_len]
 
             x_valid = x_data[split_idx:]
             y_valid = y_data[split_idx:]
+            a_valid = a_data[split_idx:]
+
             xf_valid = x_future[split_idx:]
             yf_valid = y_future[split_idx:]
+            af_valid = a_future[split_idx:]
 
             return (
                 ((x_train, xf_train), (x_valid, xf_valid)),
                 ((y_train, yf_train), (y_valid, yf_valid)),
+                ((a_train, af_train), (a_valid, af_valid)),
             )
 
-        return ((x_data, x_future), (None, None)), ((y_data, y_future), (None, None))
+        return (
+            ((x_data, x_future), (None, None)), 
+            ((y_data, y_future), (None, None)),
+            ((a_data, a_future), (None, None))
+        )
 
     def onehot_encoding(self, data: pd.DataFrame, value: pd.DataFrame, cat_col: str) -> pd.DataFrame:
         if cat_col in data.columns:
@@ -204,51 +220,48 @@ class TAGANDataset:
     def normalize(self, data):
         """Normalize input in [-1,1] range, saving statics for denormalization"""
         # 2 * (log(x + 1) - log(x + 1).min) / (log(x + 1).max - log(x + 1).min) - 1
-        norm = data
-        # norm = np.log10(norm + 1)
+        # data = np.log10(data + 1)
 
-        self.max = norm.max(0)
-        self.min = norm.min()
+        self.origin_max = data.max(0)
+        self.origin_min = data.min()
 
-        norm = norm - self.min
-        norm = norm / (self.max - self.min)
-        norm = 2 * norm - 1
+        cutting_data = data # .copy()
+        for col in data.columns:
+            unique_values = sorted(cutting_data[col].unique())
+            two_percent = int(len(unique_values) * 0.02) 
+            front_two = unique_values[:two_percent]
+            back_two = unique_values[-two_percent:]
+            for i, value in enumerate(cutting_data[col]):
+                if value in front_two:
+                    cutting_data[col][i] = unique_values[two_percent - 1]
+                elif value in back_two:
+                    cutting_data[col][i] = unique_values[-two_percent]
+                    
+        self.max = cutting_data.max(0)
+        self.min = cutting_data.min()
+
+        data = data - self.min
+        data = data / (self.max - self.min)
+        data = 2 * data - 1
         
-        data = norm
-        self.decoder_min = torch.tensor(self.min[self.targets])
         self.decoder_max = torch.tensor(self.max[self.targets])
+        self.decoder_min = torch.tensor(self.min[self.targets])
+        
         self.min = torch.tensor(self.min)
         self.max = torch.tensor(self.max)
         
         print("-----  Min Max information  -----")
         df_minmax = pd.DataFrame({
+            'origin_min': self.origin_min,
+            'origin_max': self.origin_max,
             'min': self.decoder_min,
             'max': self.decoder_max,
         }, index=self.targets)
         print(df_minmax.T)
-        # print(df_minmax2.T)
 
         return data
 
-    # def denormalize(self, data):
-    #     """Revert [-1,1] normalization"""
-    #     if not hasattr(self, "max") or not hasattr(self, "min"):
-    #         raise Exception("Try to denormalize, but the input was not normalized")
-
-    #     delta = self.max - self.min
-    #     for batch in range(data.shape[0]):
-    #         batch_denorm = data[batch]
-
-    #         batch_denorm = 0.5 * (batch_denorm + 1)
-    #         batch_denorm = batch_denorm * delta
-    #         batch_denorm = batch_denorm + self.min
-    #         batch_denorm[:, :] = np.power(10, batch_denorm[:, :]) - 1
-
-    #         data[batch] = batch_denorm
-
-    #     return data
-
-    def decoder_denormalize(self, data):
+    def denormalize(self, data):
         """Revert [-1,1] normalization"""
         if not hasattr(self, "max") or not hasattr(self, "min"):
             raise Exception("Try to denormalize, but the input was not normalized")
@@ -256,19 +269,13 @@ class TAGANDataset:
         delta = self.decoder_max - self.decoder_min
         for batch in range(data.shape[0]):
             batch_denorm = data[batch]
-            print(batch_denorm)
 
             batch_denorm = 0.5 * (batch_denorm + 1)
-            print(batch_denorm)
             batch_denorm = batch_denorm * delta
-            print(batch_denorm)
             batch_denorm = batch_denorm + self.decoder_min
-            print(batch_denorm)
-            batch_denorm = torch.pow(10, batch_denorm) - 1
+            # batch_denorm = torch.pow(10, batch_denorm) - 1
 
-            print(batch_denorm)
             data[batch] = batch_denorm
-            input()
 
         return data
 
