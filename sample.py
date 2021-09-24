@@ -1,25 +1,6 @@
-import torch
+# import torch
 import numpy as np
 import pandas as pd
-
-
-def one_hot(cat_data: pd.Series, prefix='', postfix='') -> pd.DataFrame:
-    categories = sorted(set(cat_data))
-    n_category = len(categories)
-    
-    df = []
-    for value in cat_data:
-        vec = [0] * n_category
-        find = np.where(np.array(categories) == value)[0][0]
-        vec[find] = 1.0
-        df.append(vec)
-    
-    column_names = []
-    for category in categories:
-        column_names.append(f"{prefix}{category}{postfix}")
-
-    df = pd.DataFrame(df, columns=column_names)
-    return df
 
 def one_hot_encoding(data):
     mapping_set = {}
@@ -31,9 +12,22 @@ def one_hot_encoding(data):
 
 def normalize(data):
     """Normalize input in [-1,1] range, saving statics for denormalization"""
-    ### 1. DATA Log 씌우기 
+    ### 1. DATA Log 씌우기
+    data.iloc[:, 1:] = np.log10(data.iloc[:, 1:]+ 1) 
 
     ### 2. Column 별 unique 값 찾기
+    for col in data.columns[1:]:
+        unique_values = sorted(data[col].unique())
+        two_percent = int(len(unique_values) * 0.02) 
+        front_two = unique_values[:two_percent]
+        back_two = unique_values[-two_percent:]
+        for i, value in enumerate(data[col]):
+            if value in front_two:
+                data[col][i] = unique_values[two_percent - 1]
+            elif value in back_two:
+                data[col][i] = unique_values[-two_percent]
+        print(f'{col} {len(unique_values) - len(front_two) - len(back_two) - len(data[col].unique())}')
+    
     ### 2.1   2% 지점의 값  98% 지점의 값
     # 2 * (x - x.min) / (x.max - x.min) - 1
     max = data.iloc[:, 1:].max(0)
@@ -57,16 +51,16 @@ def denormalize(data, max, min):
 
 
     ### 1. DATA Log 벗기기
-
+    data.iloc[:, 1:] = np.power(10, data.iloc[:, 1:]) - 1 
     return data
 
 if __name__ == "__main__":
-    data_path = "data/agricultural_product.csv"
+    data_path = "./data/public_data/train.csv"
     data = pd.read_csv(data_path)
     data['date'] = pd.to_datetime(data['date'])
 
     # Weekday encoding
-    data['weekday'] = one_hot_encoding(data['weekday'])
+    data['요일'] = one_hot_encoding(data['요일'])
     data = data.set_index('date')
 
     print("\n\n\n*** INPUT ***\n\n\n")

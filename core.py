@@ -10,7 +10,7 @@ from utils.logger import Logger
 logger = Logger(__file__)
 
 torch.set_printoptions(precision=2, sci_mode=False)
-pd.options.display.float_format = '{:.1f}'.format
+pd.options.display.float_format = "{:.1f}".format
 np.set_printoptions(linewidth=np.inf, precision=2, suppress=True)
 
 
@@ -19,7 +19,7 @@ def use_default_config(path: os.path = "config/config.json"):
     User Default Configuration settings
     """
     if os.path.exists(path):
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             config = json.load(f)
     return config
 
@@ -39,7 +39,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("Abort!")
 
-    # model.run()
+    model.run()
 
     # get OUTPUT Option
     # output file path : ./output_{data_title}.csv

@@ -12,12 +12,11 @@ from models.LSTMGAN import LSTMGenerator, LSTMDiscriminator
 import matplotlib.pyplot as plt
 
 from utils.args import load_yaml
-from utils.loss import GANLoss
 from utils.logger import Logger
 from utils.device import init_device
-from utils.dashboard import Dashboard
+from utils.dashboard import Dashboard_v2
+from utils.metric import TAGAN_Metric
 from utils.dataset import TAGANDataset
-from utils.metric import metric_NMAE
 
 logger = Logger(__file__)
 
@@ -47,12 +46,21 @@ class TAGANBand:
 
         # Model option
         self.bander = TAGAN_Bander(self.dataset, config=self.bander_config)
+        self.metric = TAGAN_Metric(self.bander_config, self.device)
         (self.netG, self.netD) = self.init_model()
+        self.trainer = TAGAN_Trainer(
+            (self.trainer_config, self.lr_config, self.print_cfg),
+            self.dataset,
+            self.metric,
+            self.bander,
+            self.netD,
+            self.netG,
+            self.device,
+        )
         self.losses = {"G": 0, "D": 0, "l1": 0, "l2": 0, "GP": 0, "Score": 0}
 
         # Data option
-        self.shape = self.dataset.shape
-        self.in_dim = self.dataset.in_dim
+        self.encode_dim = self.dataset.encode_dim
 
     def set_config(self, config: dict = None) -> dict:
         """
@@ -71,7 +79,7 @@ class TAGANBand:
         self.dataset_config = config["dataset"]
         model_cfg = config["model"]
         train_cfg = config["train"]
-        print_cfg = config["print"]
+        self.print_cfg = print_cfg = config["print"]
         # result_cfg = config["result"]
 
         # Model option
@@ -82,24 +90,22 @@ class TAGANBand:
         self.model_path = model_cfg["path"]
 
         # Train option
+        self.lr_config = train_cfg["learning_rate"]
         self.lr = train_cfg["learning_rate"]["base"]
         self.lr_gammaG = train_cfg["learning_rate"]["gammaG"]
         self.lr_gammaD = train_cfg["learning_rate"]["gammaD"]
 
+        self.trainer_config = train_cfg["epochs"]
         self.epochs = train_cfg["epochs"]["iter"]
         self.base_epochs = train_cfg["epochs"]["base"]
         self.iter_epochs = train_cfg["epochs"]["iter"]
         self.iter_critic = train_cfg["epochs"]["critic"]
 
         self.bander_config = train_cfg["bander"]
-        self.window_len = train_cfg["bander"]["window_len"]
-        self.gp_weight = train_cfg["bander"]["gp_weight"]
-        self.l1_gamma = train_cfg["bander"]["l1_gamma"]
-        self.l2_gamma = train_cfg["bander"]["l2_gamma"]
 
         # Print option
         self.print_verbose = print_cfg["verbose"]
-        self.print_newline = print_cfg["newline"]
+        self.print_interval = print_cfg["interval"]
 
         # Visual option
         self.visual = config["visual"]
@@ -113,50 +119,36 @@ class TAGANBand:
             data,
             batch_size=dataset.batch_size,
             num_workers=dataset.workers,
-            shuffle=True if train else False,
+            shuffle=False,  # True if train else False,
         )
         return dataloader
 
     def init_model(self):
         logger.info(f"Torch Model")
-        netG, netD = self.load_model(self.load)
 
-        # Set Oprimizer
-        self.optimizerD = optim.RMSprop(netD.parameters(), lr=self.lr * self.lr_gammaD)
-        self.optimizerG = optim.RMSprop(netG.parameters(), lr=self.lr * self.lr_gammaG)
-
-        # Set Criterion
-        self.criterion_adv = GANLoss(real_label=0.9, fake_label=0.1).to(self.device)
-        self.criterion_l1n = nn.SmoothL1Loss().to(self.device)
-        self.criterion_l2n = nn.MSELoss().to(self.device)
-
-        return (netG, netD)
-
-    def load_model(self, load_option=False):
         hidden_dim = self.dataset.hidden_dim
-        in_dim = self.dataset.in_dim
-        target_dim = self.dataset.target_dim
+        encode_dim = self.dataset.encode_dim
+        decode_dim = self.dataset.decode_dim
         device = self.device
 
-        if load_option is True:
+        if self.load is True:
             logger.info("Loading Pretrained Models..")
-            netG_path = os.path.join(self.model_path, f"{self.model_tag}/netG.pth")
-            netD_path = os.path.join(self.model_path, f"{self.model_tag}/netD.pth")
+            model_path = os.path.join(self.model_path, self.model_tag)
+            netG_path = os.path.join(model_path, "netG.pth")
+            netD_path = os.path.join(model_path, "netD.pth")
 
             if os.path.exists(netG_path) and os.path.exists(netD_path):
                 logger.info(f" - Loaded net D : {netD_path}, net G: {netG_path}")
                 return (torch.load(netG_path), torch.load(netD_path))
             else:
                 logger.info(
-                    f"Pretrained Model File ('{netG_path}', '{netD_path}') is not found"
+                    f"Pretrained Model ('{netG_path}', '{netD_path}') is not found"
                 )
 
-        netG = LSTMGenerator(
-            in_dim, out_dim=target_dim, hidden_dim=hidden_dim, device=device
-        ).to(device)
-        netD = LSTMDiscriminator(target_dim, hidden_dim=hidden_dim, device=device).to(
-            device
-        )
+        netG = LSTMGenerator(encode_dim, decode_dim, hidden_dim=hidden_dim, device=device)
+        netD = LSTMDiscriminator(decode_dim, hidden_dim=hidden_dim, device=device)
+        netG = netG.to(device)
+        netD = netD.to(device)
 
         logger.info(f"   - Network : \n{netG} \n{netD}")
         return (netG, netD)
@@ -166,224 +158,50 @@ class TAGANBand:
         train_score_plot = []
         valid_score_plot = []
 
-        # dashboard = Dashboard(self.dataset)
+        BEST_COUNT = 20
+        BEST_SCORE = 0.32
+
         EPOCHS = self.base_epochs + self.iter_epochs
         for epoch in range(self.base_epochs, EPOCHS):
             # Train Section
-            total_score = 0
-            losses = {"G": 0, "D": 0, "l1": 0, "l2": 0, "GP": 0, "Score": 0}
-            tqdm_train = tqdm(self.train_loader, loss_info("Train", epoch, losses, 0))
-
-            for i, data in enumerate(tqdm_train):
-                x_window = data["encoder"].to(self.device)
-                y_window = data["decoder"].to(self.device)
-                x_future = data["enc_future"].to(self.device)
-                y_future = data["dec_future"].to(self.device)
-
-                # Critic
-                for critic in range(self.iter_critic):
-                    y, x = self.bander.get_random_sample(self.netG)
-
-                    Dx = self.netD(x)
-                    Dy = self.netD(y)
-                    self.optimizerD.zero_grad()
-
-                    loss_GP = self.gp_weight * self._grad_penalty(y, x)
-                    loss_D_ = Dy.mean() - Dx.mean()
-
-                    loss_D = loss_D_ + loss_GP
-                    loss_D.backward()
-                    self.optimizerD.step()
-
-                # Optimizer initialize
-                self.optimizerD.zero_grad()
-                self.optimizerG.zero_grad()
-
-                Dx = self.netD(y_future)
-                errD_real = self.criterion_adv(Dx, target_is_real=True)
-                errD_real.backward(retain_graph=True)
-
-                y_gen = self.bander.get_sample(x_window, y_future, self.netG)
-                Dy = self.netD(y_gen)
-                errD_fake = self.criterion_adv(Dy, target_is_real=False)
-                errD_fake.backward(retain_graph=True)
-                errD = errD_real + errD_fake
-                self.optimizerD.step()
-
-                Dy = self.netD(y_gen)
-                err_G = self.criterion_adv(Dy, target_is_real=False)
-                err_l1 = self.l1_gamma * self.criterion_l1n(y_future, y_gen)
-                err_l2 = self.l2_gamma * self.criterion_l2n(y_future, y_gen)
-                err_gp = self.gp_weight * self._grad_penalty(y_future, y_gen)
-                errG = err_G + err_l1 + err_l2 + err_gp
-                errG.backward(retain_graph=True)
-                self.optimizerG.step()
-
-                # Scoring
-                true = self.dataset.decoder_denormalize(y_future.cpu())
-                pred = self.dataset.decoder_denormalize(y_gen.cpu())
-                score = metric_NMAE(pred, true).detach().numpy()
-
-                # Losses Log
-                losses["D"] += errD
-                losses["G"] += err_G
-                losses["l1"] += err_l1
-                losses["l2"] += err_l2
-                losses["GP"] += err_gp
-                losses["Score"] += score
-                tqdm_train.set_description(loss_info("Train", epoch, losses, i))
-            train_score_plot.append((losses["Score"]/i + 1))
+            tqdm_train = tqdm(self.train_loader, loss_info("Train", epoch))
+            train_score = self.trainer.train_step(tqdm_train, epoch, training=True)
+            train_score_plot.append(train_score)
 
             # Valid Section
-            losses = {"G": 0, "D": 0, "l1": 0, "l2": 0, "GP": 0, "Score": 0}
-            tqdm_valid = tqdm(self.valid_loader, loss_info("Valid", epoch, losses, 0))
-            for i, data in enumerate(tqdm_valid):
-                x_window = data["encoder"].to(self.device)
-                y_window = data["decoder"].to(self.device)
-                x_future = data["enc_future"].to(self.device)
-                y_future = data["dec_future"].to(self.device)
+            tqdm_valid = tqdm(self.valid_loader, loss_info("Valid", epoch))
+            valid_score = self.trainer.train_step(tqdm_valid, epoch, training=False)
+            valid_score_plot.append(valid_score)
 
-                # Optimizer initialize
-                self.optimizerD.zero_grad()
-                self.optimizerG.zero_grad()
-
-                Dx = self.netD(y_future)
-                errD_real = self.criterion_adv(Dx, target_is_real=True)
-
-                y_gen = self.bander.get_sample(x_window, y_future, self.netG)
-                Dy = self.netD(y_gen)
-                errD_fake = self.criterion_adv(Dy, target_is_real=False)
-                errD = errD_real + errD_fake
-
-                Dy = self.netD(y_gen)
-                err_G = self.criterion_adv(Dy, target_is_real=False)
-                err_l1 = self.l1_gamma * self.criterion_l1n(y_future, y_gen)
-                err_l2 = self.l2_gamma * self.criterion_l2n(y_future, y_gen)
-                err_gp = self.gp_weight * self._grad_penalty(y_future, y_gen)
-                errG = err_G + err_l1 + err_l2 + err_gp
-
-                # Scoring
-                true = self.dataset.decoder_denormalize(y_future.cpu())
-                pred = self.dataset.decoder_denormalize(y_gen.cpu())
-                score = metric_NMAE(pred, true).detach().numpy()
-
-                # Loss Log
-                losses["D"] += errD
-                losses["G"] += err_G
-                losses["l1"] += err_l1
-                losses["l2"] += err_l2
-                losses["GP"] += err_gp
-                losses["Score"] += score
-                tqdm_valid.set_description(loss_info("Valid", epoch, losses, i))
-
-            valid_score_plot.append((losses["Score"]/i + 1))
-
-            # for i, (data) in enumerate(tqdm_dataset):
-            #     for critic in range(self.iter_critic):
-            #         y, x = self.bander.get_random_sample(self.netG)
-
-            #         Dx = self.netD(x)
-            #         Dy = self.netD(y)
-            #         self.optimizerD.zero_grad()
-
-            #         loss_GP = self.gp_weight * self._grad_penalty(y, x)
-            #         loss_D_ = Dy.mean() - Dx.mean()
-
-            #         loss_D = loss_D_ + loss_GP
-            #         loss_D.backward()
-            #         self.optimizerD.step()
-
-            #         # if i == self.iter_critic - 1:
-            #         #     self.losses["D"] += loss_D
-            #         #     self.losses["GP"] += loss_GP
-
-            #     # Vanilla
-            #     self.optimizerD.zero_grad()
-            #     self.optimizerG.zero_grad()
-
-            #     x = data.to(self.device)
-            #     Dx = self.netD(x)
-            #     errD_real = self.criterion_adv(Dx, target_is_real=True)
-            #     errD_real.backward(retain_graph=True)
-
-            #     y = self.bander.get_sample(x, self.netG)
-            #     Dy = self.netD(y)
-            #     errD_fake = self.criterion_adv(Dy, target_is_real=False)
-            #     errD_fake.backward(retain_graph=True)
-
-            #     errD = errD_fake + errD_real
-            #     self.optimizerD.step()
-
-            #     Dy = self.netD(y)
-            #     err_G = self.criterion_adv(Dy, target_is_real=False)
-            #     err_l1 = self.l1_gamma * self.criterion_l1n(y, x)
-            #     err_l2 = self.l2_gamma * self.criterion_l2n(y, x)
-            #     err_gp = self.gp_weight * self._grad_penalty(y, x)
-            #     errG = err_G + err_l1 + err_l2 + err_gp
-            #     errG.backward(retain_graph=True)
-            #     self.optimizerG.step()
-
-            #     true = self.bander.variables(x)
-            #     y = self.bander.get_sample(x, self.netG)
-            #     pred = self.bander.variables(y)
-
-            #     score = metric_NMAE(pred, true)
-
-            #     losses["G"] += err_G
-            #     losses["D"] += errD
-            #     losses["l1"] += err_l1
-            #     losses["l2"] += err_l2
-            #     losses["GP"] += err_gp
-            #     losses["Score"] = score
-
-            #     # Print loss
-            #     if self.print_verbose > 0:
-            #         tqdm_dataset.set_postfix(
-            #             {
-            #                 "Epoch": epoch + 1,
-            #                 "Score": f'{losses["Score"]:2.4f}',
-            #                 "D": f'{losses["D"]:2.4f}',
-            #                 "G": f'{losses["G"]:2.4f}',
-            #                 "L1": f'{losses["l1"]:2.4f}',
-            #                 "L2": f'{losses["l2"]:2.4f}',
-            #                 "GP": f'{losses["GP"]:2.4f}',
-            #                 # 'Score': '{:06f}'.format(batch_score.item()),
-            #                 # 'Total Score' : '{:06f}'.format(total_score/(batch+1)),
-            #             }
-            #         )
-
-            #     # Visualize
-
-            #     if self.visual is True and (epoch) % 10 == 0:
-            #         dashboard.train_vis(pred)
-            
-            
-            if self.save is True and (epoch + 1) % self.save_interval == 0:
-                logger.info(f"Epcoh {epoch + 1} Model is saved")
-                true_info = true[0, 0, :].detach().numpy()
-                pred_info = pred[0, 0, :].detach().numpy()
-                result_info = pd.DataFrame({
-                    'true': true_info,
-                    'pred': pred_info,
-                    'diff': true_info - pred_info,
-                    'perc': ((true_info - pred_info) / true_info) * 100,
-                })
-                logger.info(
-                    f"-----  Result  -----"
-                    f"\n{result_info.T}\n"
-                    f"Sum(Diff/True) ({abs(sum(result_info['diff'])):.2f}/{sum(result_info['true']):.2f})"
-                    f"({sum(abs(result_info['diff']))/sum(result_info['true'])*100:.2f}%)"
-                )
-
-                logger.info(loss_info("Valid", epoch, losses, i))
+            if self.save:
+                # periodic Model save
                 model_path = os.path.join(self.model_path, self.model_tag)
-                if not os.path.exists(model_path):
-                    os.mkdir(model_path)
+                if ((epoch + 1) % self.save_interval) == 0:
+                    logger.info(
+                        f"[Epoch {epoch + 1:4d}]*** MODEL IS SAVED ***"
+                        f"(T{train_score:.4f}, V {valid_score:.4f})"
+                    )
+                    if not os.path.exists(model_path):
+                        os.mkdir(model_path)
 
-                netD_path = os.path.join(model_path, "netD.pth")
-                netG_path = os.path.join(model_path, "netG.pth")
-                torch.save(self.netD, netD_path)
-                torch.save(self.netG, netG_path)
+                    # Model save
+                    self.save_model(model_path)
+                    
+                # Best Model save
+                if valid_score < BEST_SCORE:
+                    BEST_SCORE = valid_score
+                    logger.info(f"*** BEST SCORE MODEL ({BEST_SCORE:.4f}) IS SAVED ***")
+                    self.save_model(model_path, postfix=f"_{BEST_SCORE:.4f}")
+                else:
+                    BEST_COUNT -= 1
+                    if BEST_COUNT == 0:
+                        BEST_COUNT = 20
+                        logger.info(
+                            f"*** BEST SCORE MODEL ({BEST_SCORE:.4f}) IS RELOADED ***"
+                        )
+                        self.netD = torch.load(f"{model_path}/netD_{BEST_SCORE:.4f}.pth")
+                        self.netG = torch.load(f"{model_path}/netG_{BEST_SCORE:.4f}.pth")
+
         plt.plot(train_score_plot, label="train_score")
         plt.plot(valid_score_plot, label="val_score")
         plt.xlabel("epoch")
@@ -392,11 +210,17 @@ class TAGANBand:
         plt.legend()
         plt.show()
 
+    def save_model(self, model_path, postfix=""):
+        netD_path = os.path.join(model_path, f"netD{postfix}.pth")
+        netG_path = os.path.join(model_path, f"netG{postfix}.pth")
+        torch.save(self.netD, netD_path)
+        torch.save(self.netG, netG_path)
+
     def run(self):
         logger.info("Evaluate the model")
 
         errD_real = None
-        dashboard = Dashboard(self.dataset)
+        dashboard = Dashboard_v2(self.dataset)
         for i, (data, label) in enumerate(self.dataloader, 0):
             self.optimizerD.zero_grad()
             self.optimizerG.zero_grad()
@@ -444,8 +268,6 @@ class TAGANBand:
             if self.visual:
                 dashboard.visualize(x, y, label, bands, detects, pivot=self.pivot)
 
-        logger.info(f"\n{self._loss_message()}")
-
     def get_labels(self, text=False):
         origin = self.dataset.data
         pred = self.bander.pred
@@ -453,7 +275,7 @@ class TAGANBand:
         pred[: len(median)] = median
         labels = self.bander.label
 
-        output_path = f"output_{self.dataset.title}.csv"
+        output_path = f"output_{self.dataset.file}.csv"
 
         if text:
             text_label = list()
@@ -482,14 +304,6 @@ class TAGANBand:
         runtime = f"{time:4.2f} / {done_time:4.2f} sec "
         return runtime
 
-    def _grad_penalty(self, y, x):
-        gradients = y - x
-        gradients_sqr = torch.square(gradients)
-        gradients_sqr_sum = torch.sum(gradients_sqr)
-        gradients_l2_norm = torch.sqrt(gradients_sqr_sum)
-        gradients_penalty = torch.square(1 - gradients_l2_norm) / x.size(0)
-        return gradients_penalty
-
     def _loss_message(self, i=None):
         if i is None:
             i = len(self.dataset)
@@ -505,7 +319,164 @@ class TAGANBand:
         return message
 
 
-def loss_info(process, epoch, losses, i=0):
+class TAGAN_Trainer:
+    def __init__(self, configs, dataset, metric, bander, netD, netG, device):
+        self.set_config(configs)
+        self.dataset = dataset
+        self.metric = metric
+        self.bander = bander
+        self.device = device
+
+        self.dashboard = Dashboard_v2(self.dataset)
+        self.train_score_plot = []
+        self.valid_score_plot = []
+
+        # Set Models
+        self.netD = netD
+        self.netG = netG
+
+        # Set Oprimizer
+        self.optimizerD = optim.RMSprop(netD.parameters(), lr=self.lr * self.lr_gammaD)
+        self.optimizerG = optim.RMSprop(netG.parameters(), lr=self.lr * self.lr_gammaG)
+
+    def set_config(self, configs):
+        config1, config2, config3 = configs
+
+        self.epochs = config1["iter"]
+        self.base_epochs = config1["base"]
+        self.iter_epochs = config1["iter"]
+        self.iter_critic = config1["critic"]
+
+        self.lr = config2["base"]
+        self.lr_gammaG = config2["gammaG"]
+        self.lr_gammaD = config2["gammaD"]
+
+        self.print_verbose = config3["verbose"]
+        self.print_interval = config3["interval"]
+
+        self.visual = False
+
+    def critic(self):
+        # Critic
+        for _ in range(self.iter_critic):
+            y, x = self.bander.get_random_sample(self.netG)
+
+            Dx = self.netD(x)
+            Dy = self.netD(y)
+            self.optimizerD.zero_grad()
+
+            loss_GP = self.metric.grad_penalty(y, x)
+            loss_D_ = Dy.mean() - Dx.mean()
+
+            loss_D = loss_D_ + loss_GP
+            loss_D.backward()
+            self.optimizerD.step()
+
+    def train_step(self, tqdm, epoch, training=True):
+        TAG = "Train" if training else "Valid"
+        losses = {"G": 0, "D": 0, "l1": 0, "l2": 0, "GP": 0, "Score": 0}
+
+        if not training and self.visual:
+            self.dashboard.close_figure()
+            
+        i = 0
+        for i, data in enumerate(tqdm):
+            x_window = data["encoder"].to(self.device)
+            y_window = data["decoder"].to(self.device)
+            x_future = data["enc_future"].to(self.device)
+            y_future = data["dec_future"].to(self.device)
+
+            # Critic
+            if training:
+                for _ in range(self.iter_critic):
+                    y, x = self.bander.get_random_sample(self.netG)
+
+                    Dx = self.netD(x)
+                    Dy = self.netD(y)
+                    self.optimizerD.zero_grad()
+
+                    loss_GP = self.metric.grad_penalty(y, x)
+                    loss_D_ = Dy.mean() - Dx.mean()
+
+                    loss_D = loss_D_ + loss_GP
+                    loss_D.backward()
+                    self.optimizerD.step()
+
+            # Optimizer initialize
+            self.optimizerD.zero_grad()
+            self.optimizerG.zero_grad()
+
+            Dx = self.netD(y_future)
+            errD_real = self.metric.GANloss(Dx, target_is_real=True)
+
+            y_gen = self.bander.get_sample(x_window, y_future, self.netG)
+            Dy = self.netD(y_gen)
+            errD_fake = self.metric.GANloss(Dy, target_is_real=False)
+            errD = errD_real + errD_fake
+
+            if training:
+                errD_real.backward(retain_graph=True)
+                errD_fake.backward(retain_graph=True)
+                self.optimizerD.step()
+
+            Dy = self.netD(y_gen)
+            err_G = self.metric.GANloss(Dy, target_is_real=False)
+            err_l1 = self.metric.l1loss(y_future, y_gen)
+            err_l2 = self.metric.l2loss(y_future, y_gen)
+            err_gp = self.metric.grad_penalty(y_future, y_gen)
+            errG = err_G + err_l1 + err_l2 + err_gp
+
+            if training:
+                errG.backward(retain_graph=True)
+                self.optimizerG.step()
+
+            # Scoring
+            y_window = self.dataset.decoder_denormalize(y_window.cpu())
+            true = self.dataset.decoder_denormalize(y_future.cpu())
+            pred = self.dataset.decoder_denormalize(y_gen.cpu())
+            
+            score = self.metric.NMAE(pred, true).detach().numpy()
+
+            # Losses Log
+            losses["D"] += errD
+            losses["G"] += err_G
+            losses["l1"] += err_l1
+            losses["l2"] += err_l2
+            losses["GP"] += err_gp
+            losses["Score"] += score
+
+            tqdm.set_description(loss_info(TAG, epoch, losses, i))
+            if not training and self.visual is True:
+                self.dashboard.initalize(y_window)
+                self.dashboard.visualize(y_window, true, pred)
+
+        if not training:
+            if ((epoch + 1) % self.print_interval) == 0:
+                true_info = true[0, 0, :].detach().numpy()
+                pred_info = pred[0, 0, :].detach().numpy()
+                diff_info = true_info - pred_info
+                results = pd.DataFrame(
+                    {
+                        "true": true_info,
+                        "pred": pred_info,
+                        "diff": diff_info,
+                        "perc": 100 * diff_info / true_info,
+                    }
+                )
+                logger.info(
+                    f"-----  Result (e{epoch + 1:4d})  -----"
+                    f"\n{results.T}\n"
+                    f"Sum(Diff/True) {abs(sum(results['diff'])):.2f}/{sum(results['true']):.2f}"
+                    f"({sum(abs(results['diff']))/sum(results['true'])*100:.2f}%)"
+                )
+
+        return losses["Score"] / (i + 1)
+
+
+def loss_info(process, epoch, losses=None, i=0):
+    if losses is None:
+        losses = {"G": 0, "D": 0, "l1": 0, "l2": 0, "GP": 0, "Score": 0}
+
     return (
         f"[{process} e{epoch + 1:4d}]"
         f"Score {losses['Score']/(i+1):7.4f} "

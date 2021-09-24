@@ -1,11 +1,14 @@
 import pytz
 import structlog
+import datetime
 import logging.config
 
 KST = pytz.timezone("Asia/Seoul")
 timestamper = structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S", utc=False)
 pre_chain = [structlog.stdlib.add_log_level, timestamper]
 
+today = datetime.datetime.today()
+logtime = (today).strftime('%Y%m%d')
 
 class Logger:
     def __init__(self, file):
@@ -13,8 +16,6 @@ class Logger:
         self.logger = logging.getLogger(file)
 
     def init_config(self, file):
-        logfile = file.replace(".py", "")
-        logfile = logfile.split(".")[-1]
 
         logging.config.dictConfig(
             {
@@ -41,7 +42,7 @@ class Logger:
                     "file": {
                         "level": "INFO",
                         "class": "logging.handlers.RotatingFileHandler",
-                        "filename": "logs/core.log",
+                        "filename": f"logs/{logtime}.log",
                         "formatter": "plain",
                         "backupCount": 20,
                     },

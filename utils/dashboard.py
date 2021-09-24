@@ -1,49 +1,162 @@
+import torch
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import time
 
+plt.rcParams["font.family"] = "Malgun Gothic"
+DELTA = 2
 
-class Dashboard:
-    def __init__(self, dataset):
-        super(Dashboard).__init__()
+
+class Dashboard_v2:
+    def __init__(self, dataset) -> None:
         self.dataset = dataset
-        self.seq_len = dataset.window_len
+        self.target_col = self.dataset.targets
+        self.decode_dim = self.dataset.decode_dim
+        self.window_len = self.dataset.window_len
+        self.future_len = self.dataset.future_len
+        self.scope = DELTA * self.window_len + self.future_len
+        self.feature_by_rows = 7
 
         self.fig, self.ax = self.init_figure()
+        self.predicted = 0
 
-        self.band_flag = False
-        self.bands = {"flag": False, "upper": list(), "lower": list()}
+        self.true_data = None
+        self.pred_list = [None] * self.future_len
 
-        self.area_upper = None
-        self.area_lower = None
-        self.time = self.initialize(dataset.time)
-        self.scope = 1316
-        self.idx = 0
+    def init_figure(self) -> tuple:
+        # Config subplots
+        NROWS = 1 + (self.decode_dim - 1) // self.feature_by_rows
 
-        self.detects = list()
+        fig, ax = plt.subplots(
+            NROWS, 1, figsize=(20, 10), facecolor="lightgray", sharex=True,sharey=True
+        )
+        fig.tight_layout()
 
-    def init_figure(self):
-        fig, ax = plt.subplots(figsize=(20, 6), facecolor="lightgray")
-        fig.suptitle(self.dataset.title, fontsize=25)
-        fig.set_facecolor("lightgray")
-
-        ax.set_xlabel("Time")
-        ax.set_ylabel("Value")
+        if NROWS == 1:
+            subplot_title = f"TAGAN-Band Feature to {self.decode_dim}"
+            ax.set_title(subplot_title)
+            ax = [ax]
+        else:
+            for row in range(len(ax)):
+                feature_from = row * self.feature_by_rows
+                feature_to = feature_from + min(
+                    self.decode_dim - feature_from, self.feature_by_rows
+                )
+                subplot_title = f"TAGAN-Band Feature {feature_from} to {feature_to}"
+                ax[row].set_title(subplot_title)
 
         return fig, ax
 
-    def initialize(self, value=None):
-        if value is None:
-            data_list = [list() for x in range(self.seq_len)]
-            for i in range(len(data_list)):
-                data_list[i] = np.zeros(i)
-            return data_list
-        return value
+    def initalize(self, window):
+        batch_size = window.shape[0]
+        self.true_data = window[0]
+
+        for batch in range(1, batch_size):
+            self.true_data = np.concatenate([self.true_data, window[batch, -1:]])
+
+        self.pred_list = [None] * self.future_len
+        for f in range(self.future_len):
+            self.pred_list[f] = self.true_data[: batch_size + f]
+
+    def visualize(self, window, true, pred) -> None:
+        # Clear figure
+        fig, ax = self.reset_figure()
+
+        # self.true_data, self.pred_data = self.data_concat(true, pred)
+
+        true = true[0].cpu()
+        for i, ax_ in enumerate(ax):
+            REAL_GRAPH = np.concatenate([self.true_data, true])
+            ax_.plot(REAL_GRAPH, color="k", alpha=0.5, linewidth=1)
+
+            batch_size = window.shape[0]
+            for batch in range(batch_size - 1, batch_size):
+                preds = pred[batch].cpu().detach().numpy()
+                graph = np.concatenate([self.pred_list[batch - batch_size], preds[:]])
+                ax_.plot(graph, alpha=1, linewidth=1, label=f"{batch}")
+            # Legend
+            ax_.legend(loc="upper left")
+            plt.ylim(0, 10000)
+
+        # # Set Y limit by min-max
+        # Show updated figure
+        self.show_figure()
+
+        # self.true_data, self.pred_data = self.data_concat(true, pred)
+
+        # # print(self.pred_data.shape)
+        # if self.pred_data.shape[0] == 15:
+        #     print(self.pred_data)
+
+        # start = max(self.window_len, len(self.true_data) - self.scope + 1)
+        # base = max(0, len(pred) - self.future_len - start)
+        # # scope = max(0, len(self.true_data) - self.scope + self.future_len)
+
+        # plt.axvspan(base + DELTA * self.window_len, base + DELTA * self.window_len + self.future_len, alpha=0.2)
+        # for i, ax_ in enumerate(ax):
+        #     feature_from = i * self.feature_by_rows
+        #     feature_to = feature_from + min(self.decode_dim - feature_from, self.feature_by_rows)
+        #     # Draw True data plot
+        #     for j in range(feature_from, feature_to):
+        #         label = self.target_col[j]
+
+        #         for future in range(0, self.future_len, 2):
+        #             # pred_scope = max(0, scope - self.window_len)
+        #             pred_scope = max(base, base - self.future_len)
+        #             pred_j = np.concatenate([
+        #                 self.true_data[-DELTA * self.window_len - future:, j],
+        #                 self.pred_data[-future - 1:, future, j]
+        #             ])
+        #             if self.scope < len(pred_j) - future:
+        #                 pred_j = np.concatenate([
+        #                     np.zeros((future)), pred_j
+        #                 ])
+
+        #             # pred_j = self.pred_data[pred_scope:, future, j]
+        #             ax_.plot(pred_j[future:], alpha=1, linewidth=(self.future_len - future) // 2 + 1, label=f"Pred {future} {label}")
+
+        # ax_.plot(self.true_data[-DELTA* self.window_len:, j], color='k', alpha=1, linewidth=3, label=f"True {label}")
+
+        # # Show updated figure
+        # self.show_figure()
+
+    def data_concat(self, true, pred) -> np.array:
+        batch_size = true.shape[0]
+        window_len = true.shape[1]
+        future_len = pred.shape[1]
+        decode_dim = true.shape[2]
+        true = true.numpy()
+        pred = pred.detach().numpy()
+
+        idx = 0
+        if self.true_data is None:
+            self.true_data = true[0]
+            self.pred_data = np.zeros((0, future_len, decode_dim))
+
+        # if self.predicted < future_len:
+        #     for batch in range(batch_size):
+
+        for batch in range(idx, batch_size):
+            if (true[batch, -1:] == 0).sum() >= decode_dim // 2 + 1:
+                continue
+
+            self.true_data = np.concatenate([self.true_data, true[batch, -1:]])
+            self.pred_data = np.concatenate([self.pred_data, pred[batch : batch + 1]])
+            self.predicted = min(future_len, self.predicted + 1)
+
+        return self.true_data, self.pred_data
 
     def reset_figure(self):
-        self.ax.clear()
-        self.ax.grid()
+        # Clear previous figure
+        for i in range(len(self.ax)):
+            self.ax[i].clear()
+            self.ax[i].grid()
+
+        # Set X ticks
+        xtick = np.arange(0, self.scope, 1)
+        plt.xticks(xtick, rotation=30)
+
         return self.fig, self.ax
 
     def show_figure(self):
@@ -51,83 +164,140 @@ class Dashboard:
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
 
-        return self.fig
+    def close_figure(self):
+        self.true_data = None
+        self.pred_data = None
 
-    def train_vis(self, data):
-        fig, ax = self.reset_figure()
-        start = max(self.seq_len, len(data) - self.scope + 1)
+        plt.close("all")
+        plt.pause(0.01)
+        self.fig.canvas.flush_events()
+        self.fig, self.ax = self.init_figure()
 
-        for i in range(1, 20):
-            ax.plot(data[start:, i], alpha=1, label=f"Column{i} data")
 
-        # # Fill Background Valid Area
-        # plt.fill_between(
-        #     (self.dataset.train_idx, self.dataset.valid_idx),
-        #     self.dataset.min,
-        #     self.dataset.max,
-        #     alpha=0.2,
-        #     label="Valid Set",
-        # )
+# class Dashboard:
+#     def __init__(self, dataset):
+#         super(Dashboard).__init__()
+#         self.dataset = dataset
+#         self.seq_len = dataset.window_len
 
-        # # Set Y limit by min-max
-        # plt.ylim(self.dataset.min, self.dataset.max
-        xtick = np.arange(0, self.scope, 20)
-        # values = self.time[start : start + self.scope : 24]
+#         self.fig, self.ax = self.init_figure()
 
-        plt.xticks(xtick, rotation=30)
-        plt.legend()
+#         self.band_flag = False
+#         self.bands = {"flag": False, "upper": list(), "lower": list()}
 
-        self.show_figure()
+#         self.area_upper = None
+#         self.area_lower = None
+#         self.time = self.initialize(dataset.time)
+#         self.scope = 1316
+#         self.idx = 0
 
-    def visualize(self, data, pred, label, bands, detects, pivot):
-        fig, ax = self.reset_figure()
+#         self.detects = list()
 
-        start = max(self.seq_len, data.size - self.scope + 1)
+#     def init_figure(self):
+#         fig, ax = plt.subplots(figsize=(20, 6), facecolor="lightgray")
+#         fig.suptitle(self.dataset.title, fontsize=25)
+#         fig.set_facecolor("lightgray")
 
-        length = len(pred)
+#         ax.set_xlabel("Time")
+#         ax.set_ylabel("Value")
 
-        # Pivot and Predict Area
-        base = max(0, length - self.seq_len - start)
-        detected = True in np.isin(label[:pivot], [1]) or True in np.isin(
-            label[:pivot], [-1]
-        )
-        pivot_color = "red" if detected else "lightblue"
-        preds_color = "red" if detected else "green"
-        plt.axvspan(base + pivot, length - start, facecolor=pivot_color, alpha=0.7)
-        plt.axvspan(base, base + pivot, facecolor=preds_color, alpha=0.3)
+#         return fig, ax
 
-        # Anomalies Line
-        for xpos, color in detects["labeled"]:
-            if xpos >= start:
-                plt.axvline(xpos - start, 0, 1, color=color, linewidth=4, alpha=0.2)
+#     def initialize(self, value=None):
+#         if value is None:
+#             data_list = [list() for x in range(self.seq_len)]
+#             for i in range(len(data_list)):
+#                 data_list[i] = np.zeros(i)
+#             return data_list
+#         return value
 
-        for xpos, ypos, color in detects["analized"]:
-            if xpos >= start:
-                plt.scatter(xpos - start, ypos, color=color, s=10)
+#     def reset_figure(self):
+#         self.ax.clear()
+#         self.ax.grid()
+#         return self.fig, self.ax
 
-        # Bands Area
-        xscope = np.arange(len(bands["upper"][0][start:]))
-        for i in range(3):
-            color = "blue" if i < 2 else "red"
-            alpha = (3 - i) / 10
-            ax.fill_between(
-                xscope,
-                bands["upper"][i][start:],
-                bands["lower"][i][start:],
-                color=color,
-                alpha=alpha,
-            )
+#     def show_figure(self):
+#         self.fig.show(block=False)
+#         self.fig.canvas.draw()
+#         self.fig.canvas.flush_events()
 
-        # Data/Predict Line
-        ax.plot(data[start:], "r-", alpha=1, label="data")
-        ax.plot(pred[start:], "b-", alpha=0.2, label="pred")
-        ax.plot(bands["median"][start:], "k-", alpha=0.5, label="median")
+#         return self.fig
 
-        xtick = np.arange(0, self.scope, 24)
-        values = self.time[start : start + self.scope : 24]
+#     def train_vis(self, data):
+#         fig, ax = self.reset_figure()
+#         start = max(self.seq_len, len(data) - self.scope + 1)
 
-        plt.ylim(self.dataset.min, self.dataset.max)
-        plt.xticks(xtick, values, rotation=30)
-        plt.legend()
+#         for i in range(1, 20):
+#             ax.plot(data[start:, i], alpha=1, label=f"Column{i} data")
 
-        self.show_figure()
+#         # # Fill Background Valid Area
+#         # plt.fill_between(
+#         #     (self.dataset.train_idx, self.dataset.valid_idx),
+#         #     self.dataset.min,
+#         #     self.dataset.max,
+#         #     alpha=0.2,
+#         #     label="Valid Set",
+#         # )
+
+#         # # Set Y limit by min-max
+#         # plt.ylim(self.dataset.min, self.dataset.max
+#         xtick = np.arange(0, self.scope, 20)
+#         # values = self.time[start : start + self.scope : 24]
+
+#         plt.xticks(xtick, rotation=30)
+#         plt.legend()
+
+#         self.show_figure()
+
+#     def visualize(self, data, pred, label, bands, detects, pivot):
+#         fig, ax = self.reset_figure()
+
+#         start = max(self.seq_len, data.size - self.scope + 1)
+
+#         length = len(pred)
+
+#         # Pivot and Predict Area
+#         base = max(0, length - self.seq_len - start)
+#         detected = True in np.isin(label[:pivot], [1]) or True in np.isin(
+#             label[:pivot], [-1]
+#         )
+#         pivot_color = "red" if detected else "lightblue"
+#         preds_color = "red" if detected else "green"
+#         plt.axvspan(base + pivot, length - start, facecolor=pivot_color, alpha=0.7)
+#         plt.axvspan(base, base + pivot, facecolor=preds_color, alpha=0.3)
+
+#         # Anomalies Line
+#         for xpos, color in detects["labeled"]:
+#             if xpos >= start:
+#                 plt.axvline(xpos - start, 0, 1, color=color, linewidth=4, alpha=0.2)
+
+#         for xpos, ypos, color in detects["analized"]:
+#             if xpos >= start:
+#                 plt.scatter(xpos - start, ypos, color=color, s=10)
+
+#         # Bands Area
+#         xscope = np.arange(len(bands["upper"][0][start:]))
+#         for i in range(3):
+#             color = "blue" if i < 2 else "red"
+#             alpha = (3 - i) / 10
+#             ax.fill_between(
+#                 xscope,
+#                 bands["upper"][i][start:],
+#                 bands["lower"][i][start:],
+#                 color=color,
+#                 alpha=alpha,
+#             )
+
+#         # Data/Predict Line
+#         ax.plot(data[start:], "r-", alpha=1, label="data")
+#         ax.plot(pred[start:], "b-", alpha=0.2, label="pred")
+#         ax.plot(bands["median"][start:], "k-", alpha=0.5, label="median")
+
+#         xtick = np.arange(0, self.scope, 24)
+#         values = self.time[start : start + self.scope : 24]
+
+#         plt.ylim(self.dataset.min, self.dataset.max)
+#         plt.xticks(xtick, values, rotation=30)
+#         plt.legend()
+
+#         self.show_figure()
