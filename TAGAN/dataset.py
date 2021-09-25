@@ -138,6 +138,7 @@ class TAGANDataset:
 
         data.set_index(self.index_col)
         data = data.drop(self.index_col, axis=1)
+        # data = data.drop("팽이버섯_wind", axis=1)
 
         # KEEP ANSWER DATA
         real_data = data[self.targets].copy()
@@ -226,27 +227,30 @@ class TAGANDataset:
 
     def normalize(self, data):
         """Normalize input in [-1,1] range, saving statics for denormalization"""
-        # 2 * (log(x + 1) - log(x + 1).min) / (log(x + 1).max - log(x + 1).min) - 1
+        # 2 * (x - x.min) / (x.max - x.min) - 1
         # data = np.log10(data + 1)
 
         self.origin_max = data.max(0)
         self.origin_min = data.min()
+        self.max = data.max(0)
+        self.min = data.min()
+        percent = 0.02
+        logger.info(f"Cutting : {percent}")
 
         cutting_data = data  # .copy()
         for col in data.columns:
             unique_values = sorted(cutting_data[col].unique())
-            percent = 0.02
             cut_idx = int(len(unique_values) * percent)
             front_two = unique_values[:cut_idx]
             back_two = unique_values[-cut_idx:]
             for i, value in enumerate(cutting_data[col]):
                 if value in front_two:
                     cutting_data[col][i] = unique_values[cut_idx - 1]
-                elif value in back_two:
-                    cutting_data[col][i] = unique_values[-cut_idx]
+                # elif value in back_two:
+                #     cutting_data[col][i] = unique_values[-cut_idx]
 
-        self.max = cutting_data.max(0) * 1.01
-        self.min = cutting_data.min(0) * 0.99
+        self.max = cutting_data.max(0)
+        self.min = cutting_data.min() * 0.9
 
         data = data - self.min
         data = data / (self.max - self.min)
