@@ -1,9 +1,9 @@
 import os
 import json
-import pandas as pd
-import numpy as np
 import torch
-from utils.seed import seeding
+import random
+import numpy as np
+import pandas as pd
 from models.TAGANBand import TAGANBand
 from utils.logger import Logger
 
@@ -23,7 +23,15 @@ def use_default_config(path: os.path = "config/config.json"):
             config = json.load(f)
     return config
 
-
+def seeding(seed=31):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = True
+    logger.info(f"  Seed   : {seed}")
+    
 if __name__ == "__main__":
     logger.info("*** TAGAN-BAND ***")
     logger.info("- System setting -")

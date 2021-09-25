@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.optim as optim
 
 
 class TAGAN_Metric:
@@ -11,11 +12,10 @@ class TAGAN_Metric:
         self.criterion_adv = GANLoss(real_label=0.9, fake_label=0.1).to(self.device)
 
     def set_config(self, config):
-        self.window_len = config["window_len"]
-        self.gp_weight = config["gp_weight"]
-        self.l1_gamma = config["l1_gamma"]
-        self.l2_gamma = config["l2_gamma"]
         self.zero_ignoring = config["zero_ignoring"]
+        self.gp_weight = config["gp_weight"]
+        self.l1_weight = config["l1_weight"]
+        self.l2_weight = config["l2_weight"]
 
     def GANloss(self, D, target_is_real):
         return self.criterion_adv(D, target_is_real)
@@ -32,11 +32,11 @@ class TAGAN_Metric:
 
     def l1loss(self, pred, true):
         pred, true = self._ignore_zero(pred, true)
-        return self.l1_gamma * self.criterion_l1n(pred, true)
+        return self.l1_weight * self.criterion_l1n(pred, true)
 
     def l2loss(self, pred, true):
         pred, true = self._ignore_zero(pred, true)
-        return self.l2_gamma * self.criterion_l2n(pred, true)
+        return self.l2_weight * self.criterion_l2n(pred, true)
 
     def grad_penalty(self, pred, true):
         pred, true = self._ignore_zero(pred, true)

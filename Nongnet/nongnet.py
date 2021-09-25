@@ -20,7 +20,7 @@ today = datetime.datetime.today()
 
 try:
     basedir = "Nongnet"
-    for delta in range(2455, 2460, 1):
+    for delta in range(2820, 3190):
         print(f"***** {delta} *****")
         date = (today - datetime.timedelta(delta)).strftime('%Y%m%d')
         print(date)
@@ -32,16 +32,12 @@ try:
         if not os.path.exists(yy_path):
             os.mkdir(yy_path)
 
-        mm_path = os.path.join(yy_path, date[4:6])
-        if not os.path.exists(mm_path):
-            os.mkdir(mm_path)
-
         if len(response['data']) > 0:
             data = pd.DataFrame(response['data'])
         
             print(f"Date ({date}) DATA IS SAVED")
             print(data[:2])
-            dd_path = os.path.join(mm_path, f"{date}.csv")
+            dd_path = os.path.join(yy_path, f"{date}.csv")
             data.to_csv(dd_path)
         
 except KeyboardInterrupt:

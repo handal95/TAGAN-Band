@@ -307,9 +307,27 @@ class TAGANDataset:
 
         return data
 
+    def get_sample(self, x, netG):
+        y = netG(x).to(self.device)
+        return y
+    
+    def get_random_sample(self, netG):
+        idx = np.random.randint(self.shape)
+        data = self.train_dataset[idx]
+
+        x_window = data["encoder"].to(self.device)
+        y_window = data["decoder"].to(self.device)
+        x_future = data["enc_future"].to(self.device)
+        y_future = data["dec_future"].to(self.device)
+
+        y_generate = self.get_sample(x_window, netG)
+
+        return y_generate, y_future
 
     def __len__(self):
         return self.length
 
     def __getitem__(self, idx):
         return self.train_dataset[idx]
+
+    
