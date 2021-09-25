@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 
-class TAGAN_Metric:
+class TAGANMetric:
     def __init__(self, config, device):
         self.set_config(config)
         self.device = device

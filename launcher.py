@@ -4,7 +4,7 @@ import torch
 import random
 import numpy as np
 import pandas as pd
-from models.TAGANBand import TAGANBand
+from TAGAN.core import TAGANCore
 from utils.logger import Logger
 
 logger = Logger(__file__)
@@ -41,7 +41,7 @@ if __name__ == "__main__":
     seeding(31)
 
     logger.info("- Model Setting -")
-    model = TAGANBand(config=config)
+    model = TAGANCore(config=config)
 
     logger.info("- Model Running -")
     try:

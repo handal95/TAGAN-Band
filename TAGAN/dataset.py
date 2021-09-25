@@ -1,45 +1,41 @@
 import os
-import json
 import torch
+import typing
 import numpy as np
 import pandas as pd
-import typing
-from tabulate import tabulate
+from torch.utils.data import DataLoader
 
 from utils.logger import Logger
-from utils.preprocess import one_hot, one_hot_encoding
+from utils.preprocess import one_hot
 
 
 logger = Logger(__file__)
 
-MISSING = -1.0
-ANOMALY = 1.0
-
 
 class Dataset:
-    def __init__(self, encoder, decoder, answer):
-        self.encoder = encoder[0]
-        self.encoder_future = encoder[1]
+    def __init__(self, dataset, device):
+        self.encodes = dataset["encode"]
+        self.decodes = dataset["decode"]
 
-        self.decoder = decoder[0]
-        self.decoder_future = decoder[1]
+        self.windows = dataset["window"]
+        self.futures = dataset["future"]
 
-        self.answer = answer[0]
-        self.answer_future = answer[1]
-        self.length = len(self.encoder)
+        self.length = len(self.encodes)
+        self.device = device
 
     def __len__(self):
         return self.length
 
     def __getitem__(self, idx):
-        return {
-            "encoder": torch.tensor(self.encoder[idx], dtype=torch.float32),
-            "decoder": torch.tensor(self.decoder[idx], dtype=torch.float32),
-            "answer": torch.tensor(self.answer[idx], dtype=torch.float32),
-            "enc_future": torch.tensor(self.encoder_future[idx], dtype=torch.float32),
-            "dec_future": torch.tensor(self.decoder_future[idx], dtype=torch.float32),
-            "ans_future": torch.tensor(self.answer_future[idx], dtype=torch.float32),
+        data = {
+            "encode": torch.tensor(self.encodes[idx], dtype=torch.float32),
+            "decode": torch.tensor(self.decodes[idx], dtype=torch.float32),
+
+            "window": torch.tensor(self.windows[idx], dtype=torch.float32),
+            "future": torch.tensor(self.futures[idx], dtype=torch.float32)
         }
+
+        return data
 
 
 class TAGANDataset:
@@ -50,7 +46,9 @@ class TAGANDataset:
 
     def __init__(self, config: dict, device: torch.device) -> None:
         """
-        params:
+        TAGAN Dataset
+
+        Args:
             config: Dataset configuration dict
             device: Torch device (cpu / cuda:0)
         """
@@ -63,17 +61,21 @@ class TAGANDataset:
         self.device = device
 
         # Load Data
-        (x_train, x_valid), (y_train, y_valid), (a_train, a_valid) = self.load_data()
-
-        logger.info(f"  - Train  : {x_train[0].shape}, {y_train[1].shape}")
-        logger.info(f"  - Valid  : {x_valid[0].shape}, {y_valid[1].shape}")
-        self.train_dataset = Dataset(x_train, y_train, a_train)
-        self.valid_dataset = Dataset(x_valid, y_valid, a_valid)
-
+        train_set, valid_set = self.load_data()
+        
         # Feature info
-        self.shape = y_train[0].shape
-        self.encode_dim = x_train[0].shape[2]
-        self.decode_dim = y_train[0].shape[2]
+        self.shape = train_set['decode'].shape
+        self.encode_dims = train_set['encode'].shape[2]
+        self.decode_dims = train_set['decode'].shape[2]
+        self.dims = {
+            "encode": self.encode_dims, 
+            "decode": self.decode_dims
+        }
+        
+        # Dataset
+        self.train_dataset = Dataset(train_set, self.device)
+        self.valid_dataset = Dataset(valid_set, self.device)
+
 
     def set_config(self, config: dict) -> None:
         """
@@ -85,12 +87,12 @@ class TAGANDataset:
         """
 
         # Data file configuration
-        self.path = config["path"]  # dirctory path
-        self.file = config["file"]  # csv format file
-        self.workers = config["workers"]  # Thread workers
+        self.directory = config["directory"]  # dirctory path
+        self.data_name = config["data_name"]  # csv format file
+        self.data_path = os.path.join(self.directory, self.data_name)
 
         # Columns
-        self.key = config["key"]
+        self.index_col = config["index_col"]
         self.year = config["year"]
         self.month = config["month"]
         self.weekday = config["weekday"]
@@ -99,18 +101,13 @@ class TAGANDataset:
         self.stride = config["stride"]
         self.window_len = config["window_len"]
         self.future_len = config["future_len"]
-        self.batch_size = config["batch_size"]
-        self.hidden_dim = config["hidden_dim"]
 
         self.train_option = config["train"]["opt"]
         self.split_rate = config["train"]["split_rate"]
 
-        self.data_path = os.path.join(config["path"], f"{self.file}.csv")
-        # self.label_path = os.path.join(config["path"], f"{self.title}.json")
-
     def load_data(self) -> typing.Tuple:
         # Read csv data
-        data = pd.read_csv(self.data_path)
+        data = pd.read_csv(f"{self.data_path}.csv")
 
         self.length = data.shape[0]
         self.columns = data.columns
@@ -119,54 +116,55 @@ class TAGANDataset:
         logger.info(f"  - Length : {self.length}")
 
         self.data = data
-        x_data, y_data, a_data = self.preprocess(data)
+        train_set, valid_set = self.preprocess(data)
 
-        return x_data, y_data, a_data
+        return train_set, valid_set
 
     def preprocess(self, data: pd.DataFrame) -> typing.Tuple:
-        logger.info(f"  - Index  : {self.key}")
+        logger.info(f"  - Index  : {self.index_col}")
         logger.info(f"  - Target : ({len(self.targets)} items)\n{self.targets}")
-        data[self.key] = pd.to_datetime(data[self.key])
+        data[self.index_col] = pd.to_datetime(data[self.index_col])
 
         # Date information preprocess
-        month_data = data[self.key].dt.month_name()
+        month_data = data[self.index_col].dt.month_name()
         if self.month in data.columns:
             month_data = data[self.month]
             data = data.drop(self.month, axis=1)
 
-        weekday_data = data[self.key].dt.day_name()
+        weekday_data = data[self.index_col].dt.day_name()
         if self.weekday in data.columns:
             # weekday_data = data[self.weekday]
             data = data.drop(self.weekday, axis=1)
 
-        data.set_index(self.key)
-        data = data.drop(self.key, axis=1)
+        data.set_index(self.index_col)
+        data = data.drop(self.index_col, axis=1)
+
+        # KEEP ANSWER DATA
+        real_data = data[self.targets].copy()
+
+        # Zero Value Imputating
+        logger.info(f"  - Imputer : mean(-1d, -1w, -1y)")
+        data = self.imputate_zero_value(data)
+        data.to_csv("./data/outputs/imputed.csv")
 
         # Normalize
         logger.info(f"  - Scaler : Min-Max")
-        answer = data[self.targets].copy()
-
-        data = self.imputate_zero_value(data)
-
-        # print(data.iloc[:60])
-        data.to_csv("./data/outputs/imputed.csv")
         data = self.normalize(data)
-
         month_encode = one_hot(month_data)
         weekday_encode = one_hot(weekday_data)
         data = pd.concat([data, month_encode], axis=1)
         data = pd.concat([data, weekday_encode], axis=1)
         data.to_csv("./data/outputs/processed.csv")
 
-        # X Y Split - Custom for dataset
-        x_data = data
-        y_data = data[self.targets].copy()
+        # Windowing
+        encode_data = data
+        decode_data = data[self.targets].copy()
 
         # Windowing
-        a_data, a_future = self.windowing(answer)
-        x_data, x_future = self.windowing(x_data)
-        y_data, y_future = self.windowing(y_data)
-
+        encode, _ = self.windowing(encode_data)
+        _, decode = self.windowing(decode_data)
+        window, future = self.windowing(real_data)
+        
         # When the train option is on, split train and valid data
         if self.train_option:
             split_idx = max(int(len(data) * self.split_rate), self.future_len + 1)
@@ -174,32 +172,31 @@ class TAGANDataset:
                 f"  - Split  : Train({self.split_rate:.2f}), Valid({1 - self.split_rate:.2f})"
             )
 
-            x_train = x_data[: split_idx - self.future_len]
-            y_train = y_data[: split_idx - self.future_len]
-            a_train = a_data[: split_idx - self.future_len]
-            xf_train = x_future[: split_idx - self.future_len]
-            yf_train = y_future[: split_idx - self.future_len]
-            af_train = a_future[: split_idx - self.future_len]
+            # Train
+            train_set = {
+                "encode": encode[: split_idx - self.future_len],
+                "decode": decode[: split_idx - self.future_len],
+                "window": window[: split_idx - self.future_len],
+                "future": future[: split_idx - self.future_len]
+            }
 
-            x_valid = x_data[split_idx:]
-            y_valid = y_data[split_idx:]
-            a_valid = a_data[split_idx:]
+            # Train
+            valid_set = {
+                "encode": encode[split_idx: ],
+                "decode": decode[split_idx: ],
+                "window": window[split_idx: ],
+                "future": future[split_idx: ]
+            }
+            
+            return train_set, valid_set
 
-            xf_valid = x_future[split_idx:]
-            yf_valid = y_future[split_idx:]
-            af_valid = a_future[split_idx:]
-
-            return (
-                ((x_train, xf_train), (x_valid, xf_valid)),
-                ((y_train, yf_train), (y_valid, yf_valid)),
-                ((a_train, af_train), (a_valid, af_valid)),
-            )
-
-        return (
-            ((x_data, x_future), (None, None)),
-            ((y_data, y_future), (None, None)),
-            ((a_data, a_future), (None, None)),
-        )
+        data_set = {
+            "encode": encode,
+            "decode": decode,
+            "window": window,
+            "future": future
+        }
+        return data_set, data_set
 
     def onehot_encoding(
         self, data: pd.DataFrame, value: pd.DataFrame, cat_col: str
@@ -214,18 +211,18 @@ class TAGANDataset:
     def windowing(self, x):
         stop = len(x) - self.window_len - self.future_len
 
-        data = []
-        target = []
+        window = []
+        future = []
         for i in range(0, stop, self.stride):
             j = i + self.window_len
 
-            data.append(x[i : i + self.window_len])
-            target.append(x[j : j + self.future_len])
+            window.append(x[i : i + self.window_len])
+            future.append(x[j : j + self.future_len])
 
-        data = np.array(data)
-        target = np.array(target)
+        window = np.array(window)
+        future = np.array(future)
 
-        return data, target
+        return window, future
 
     def normalize(self, data):
         """Normalize input in [-1,1] range, saving statics for denormalization"""
@@ -255,8 +252,8 @@ class TAGANDataset:
         data = data / (self.max - self.min)
         data = 2 * data - 1
 
-        self.decoder_max = torch.tensor(self.max[self.targets])
-        self.decoder_min = torch.tensor(self.min[self.targets])
+        self.decode_max = torch.tensor(self.max[self.targets])
+        self.decode_min = torch.tensor(self.min[self.targets])
 
         self.min = torch.tensor(self.min)
         self.max = torch.tensor(self.max)
@@ -265,8 +262,8 @@ class TAGANDataset:
         df_minmax = pd.DataFrame(
             {
                 "MIN": self.origin_min,
-                f"min ({(percent) * 100})": self.decoder_min,
-                f"max ({(1 - percent) * 100})": self.decoder_max,
+                f"min ({(percent) * 100})": self.decode_min,
+                f"max ({(1 - percent) * 100})": self.decode_max,
                 "MAX": self.origin_max,
             },
             index=self.targets,
@@ -280,13 +277,13 @@ class TAGANDataset:
         if not hasattr(self, "max") or not hasattr(self, "min"):
             raise Exception("Try to denormalize, but the input was not normalized")
 
-        delta = self.decoder_max - self.decoder_min
+        delta = self.decode_max - self.decode_min
         for batch in range(data.shape[0]):
             batch_denorm = data[batch]
 
             batch_denorm = 0.5 * (batch_denorm + 1)
             batch_denorm = batch_denorm * delta
-            batch_denorm = batch_denorm + self.decoder_min
+            batch_denorm = batch_denorm + self.decode_min
             # batch_denorm = torch.pow(10, batch_denorm) - 1
 
             data[batch] = batch_denorm
@@ -314,22 +311,19 @@ class TAGANDataset:
 
         return data
 
-    def get_sample(self, x, netG):
-        y = netG(x).to(self.device)
-        return y
-
-    def get_random_sample(self, netG):
+    def get_random(self):
         idx = np.random.randint(self.shape)
         data = self.train_dataset[idx]
+        
+        encode = data["encode"].to(self.device)
+        decode = data["decode"].to(self.device)
+        
+        return encode, decode
 
-        x_window = data["encoder"].to(self.device)
-        y_window = data["decoder"].to(self.device)
-        x_future = data["enc_future"].to(self.device)
-        y_future = data["dec_future"].to(self.device)
-
-        y_generate = self.get_sample(x_window, netG)
-
-        return y_generate, y_future
+    def loader(self, batch_size: int, n_workers: int, train: bool = False):
+        dataset = self.train_dataset if train else self.valid_dataset
+        dataloader = DataLoader(dataset, batch_size, num_workers=n_workers)
+        return dataloader
 
     def __len__(self):
         return self.length
