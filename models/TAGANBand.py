@@ -45,8 +45,12 @@ class TAGANBand:
         self.metric = TAGAN_Metric(self.metric_config, self.device)
         self.netG, self.netD = self.init_model()
         # Set Oprimizer
-        self.optimizerD = optim.RMSprop(self.netD.parameters(), lr=self.lr * self.lr_gammaD)
-        self.optimizerG = optim.RMSprop(self.netG.parameters(), lr=self.lr * self.lr_gammaG)
+        self.optimizerD = optim.RMSprop(
+            self.netD.parameters(), lr=self.lr * self.lr_gammaD
+        )
+        self.optimizerG = optim.RMSprop(
+            self.netG.parameters(), lr=self.lr * self.lr_gammaG
+        )
 
         self.dashboard = Dashboard_v2(self.dataset)
 
@@ -111,7 +115,7 @@ class TAGANBand:
             data,
             batch_size=dataset.batch_size,
             num_workers=dataset.workers,
-            shuffle=False
+            shuffle=False,
         )
         return dataloader
 
@@ -137,7 +141,9 @@ class TAGANBand:
             else:
                 logger.info(f"Pretrained Model is not found")
 
-        netG = LSTMGenerator(encode_dim, decode_dim, hidden_dim=hidden_dim, device=device)
+        netG = LSTMGenerator(
+            encode_dim, decode_dim, hidden_dim=hidden_dim, device=device
+        )
         netD = LSTMDiscriminator(decode_dim, hidden_dim=hidden_dim, device=device)
         netG = netG.to(device)
         netD = netD.to(device)
@@ -179,12 +185,14 @@ class TAGANBand:
 
                         # Model save
                         self.save_model(model_path)
-                        
+
                     # Best Model save
                     if valid_score < BEST_SCORE:
                         BEST_SCORE = valid_score
                         BEST_COUNT = 20
-                        logger.info(f"*** BEST SCORE MODEL ({BEST_SCORE:.4f}) IS SAVED ***")
+                        logger.info(
+                            f"*** BEST SCORE MODEL ({BEST_SCORE:.4f}) IS SAVED ***"
+                        )
                         self.save_model(model_path, postfix=f"_{BEST_SCORE:.4f}")
                     else:
                         BEST_COUNT -= 1
@@ -193,14 +201,18 @@ class TAGANBand:
                             logger.info(
                                 f"*** BEST SCORE MODEL ({BEST_SCORE:.4f}) IS RELOADED ***"
                             )
-                            self.netD = torch.load(f"{model_path}/netD_{BEST_SCORE:.4f}.pth")
-                            self.netG = torch.load(f"{model_path}/netG_{BEST_SCORE:.4f}.pth")
+                            self.netD = torch.load(
+                                f"{model_path}/netD_{BEST_SCORE:.4f}.pth"
+                            )
+                            self.netG = torch.load(
+                                f"{model_path}/netG_{BEST_SCORE:.4f}.pth"
+                            )
         except:
             raise
         finally:
             self.netD = torch.load(f"{model_path}/netD_{BEST_SCORE:.4f}.pth")
             self.netG = torch.load(f"{model_path}/netG_{BEST_SCORE:.4f}.pth")
-            logger.info("Saving Best model...")                
+            logger.info("Saving Best model...")
             self.save_model(model_path)
 
         plt.plot(train_score_plot, label="train_score")
@@ -214,7 +226,11 @@ class TAGANBand:
     def train_step(self, tqdm, epoch, training=True):
         TAG = "Train" if training else "Valid"
         losses = {
-            "G": 0, "D": 0, "l1": 0, "l2": 0, "GP": 0, 
+            "G": 0,
+            "D": 0,
+            "l1": 0,
+            "l2": 0,
+            "GP": 0,
             "Score": 0,
             "Score1": 0,
             "Score2": 0,
@@ -225,7 +241,7 @@ class TAGANBand:
 
         if not training and self.visual:
             self.dashboard.close_figure()
-            
+
         i = 0
         for i, data in enumerate(tqdm):
             # Critic
@@ -243,14 +259,14 @@ class TAGANBand:
                     loss_D = loss_D_ + loss_GP
                     loss_D.backward()
                     self.optimizerD.step()
-            
+
             x_window = data["encoder"].to(self.device)
             y_window = data["decoder"].to(self.device)
             a_window = data["answer"].to(self.device)
             x_future = data["enc_future"].to(self.device)
             y_future = data["dec_future"].to(self.device)
             a_future = data["ans_future"].to(self.device)
-            
+
             # Optimizer initialize
             self.optimizerD.zero_grad()
             self.optimizerG.zero_grad()
@@ -283,7 +299,7 @@ class TAGANBand:
             window = a_window.cpu()
             true = a_future.cpu()
             pred = self.dataset.denormalize(y_fake.cpu())
-            
+
             score = self.metric.NMAE(pred, true, real_test=True).detach().numpy()
             score1 = self.metric.NMAE(pred[:, 0], true[:, 0]).detach().numpy()
             score2 = self.metric.NMAE(pred[:, 6], true[:, 6]).detach().numpy()
@@ -319,7 +335,8 @@ class TAGANBand:
                     "pred": pred_info,
                     "diff": diff_info,
                     "perc": 100 * diff_info / true_info,
-                }, index=self.dataset.targets
+                },
+                index=self.dataset.targets,
             )
             logger.info(
                 f"-----  Result (e{epoch + 1:4d}) +1 day -----"
@@ -329,7 +346,7 @@ class TAGANBand:
             )
 
         return losses["Score"] / (i + 1)
-    
+
     def save_model(self, model_path, postfix=""):
         netD_path = os.path.join(model_path, f"netD{postfix}.pth")
         netG_path = os.path.join(model_path, f"netG{postfix}.pth")
@@ -340,8 +357,17 @@ class TAGANBand:
 def loss_info(process, epoch, losses=None, i=0):
     if losses is None:
         losses = {
-            "G": 0, "D": 0, "l1": 0, "l2": 0, "GP": 0, "Score": 0,
-            "Score1": 0, "Score2": 0, "Score3": 0, "Score4": 0, "ScoreAll": 0
+            "G": 0,
+            "D": 0,
+            "l1": 0,
+            "l2": 0,
+            "GP": 0,
+            "Score": 0,
+            "Score1": 0,
+            "Score2": 0,
+            "Score3": 0,
+            "Score4": 0,
+            "ScoreAll": 0,
         }
 
     return (

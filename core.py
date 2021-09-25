@@ -23,6 +23,7 @@ def use_default_config(path: os.path = "config/config.json"):
             config = json.load(f)
     return config
 
+
 def seeding(seed=31):
     random.seed(seed)
     np.random.seed(seed)
@@ -31,7 +32,8 @@ def seeding(seed=31):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = True
     logger.info(f"  Seed   : {seed}")
-    
+
+
 if __name__ == "__main__":
     logger.info("*** TAGAN-BAND ***")
     logger.info("- System setting -")

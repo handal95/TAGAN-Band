@@ -63,7 +63,7 @@ class TAGANDataset:
         self.device = device
 
         # Load Data
-        (x_train, x_valid), (y_train, y_valid), (a_train, a_valid)= self.load_data()
+        (x_train, x_valid), (y_train, y_valid), (a_train, a_valid) = self.load_data()
 
         logger.info(f"  - Train  : {x_train[0].shape}, {y_train[1].shape}")
         logger.info(f"  - Valid  : {x_valid[0].shape}, {y_valid[1].shape}")
@@ -71,7 +71,7 @@ class TAGANDataset:
         self.valid_dataset = Dataset(x_valid, y_valid, a_valid)
 
         # Feature info
-        self.shape      = y_train[0].shape
+        self.shape = y_train[0].shape
         self.encode_dim = x_train[0].shape[2]
         self.decode_dim = y_train[0].shape[2]
 
@@ -85,9 +85,9 @@ class TAGANDataset:
         """
 
         # Data file configuration
-        self.path = config["path"]  # dirctory path 
+        self.path = config["path"]  # dirctory path
         self.file = config["file"]  # csv format file
-        self.workers = config["workers"]    # Thread workers
+        self.workers = config["workers"]  # Thread workers
 
         # Columns
         self.key = config["key"]
@@ -145,9 +145,9 @@ class TAGANDataset:
         # Normalize
         logger.info(f"  - Scaler : Min-Max")
         answer = data[self.targets].copy()
-        
+
         data = self.imputate_zero_value(data)
-        
+
         # print(data.iloc[:60])
         data.to_csv("./data/outputs/imputed.csv")
         data = self.normalize(data)
@@ -157,27 +157,29 @@ class TAGANDataset:
         data = pd.concat([data, month_encode], axis=1)
         data = pd.concat([data, weekday_encode], axis=1)
         data.to_csv("./data/outputs/processed.csv")
-        
+
         # X Y Split - Custom for dataset
         x_data = data
         y_data = data[self.targets].copy()
-        
+
         # Windowing
         a_data, a_future = self.windowing(answer)
         x_data, x_future = self.windowing(x_data)
         y_data, y_future = self.windowing(y_data)
-        
+
         # When the train option is on, split train and valid data
         if self.train_option:
             split_idx = max(int(len(data) * self.split_rate), self.future_len + 1)
-            logger.info(f"  - Split  : Train({self.split_rate:.2f}), Valid({1 - self.split_rate:.2f})")
+            logger.info(
+                f"  - Split  : Train({self.split_rate:.2f}), Valid({1 - self.split_rate:.2f})"
+            )
 
-            x_train = x_data[:split_idx - self.future_len]
-            y_train = y_data[:split_idx - self.future_len]
-            a_train = a_data[:split_idx - self.future_len]
-            xf_train = x_future[:split_idx - self.future_len]
-            yf_train = y_future[:split_idx - self.future_len]
-            af_train = a_future[:split_idx - self.future_len]
+            x_train = x_data[: split_idx - self.future_len]
+            y_train = y_data[: split_idx - self.future_len]
+            a_train = a_data[: split_idx - self.future_len]
+            xf_train = x_future[: split_idx - self.future_len]
+            yf_train = y_future[: split_idx - self.future_len]
+            af_train = a_future[: split_idx - self.future_len]
 
             x_valid = x_data[split_idx:]
             y_valid = y_data[split_idx:]
@@ -194,16 +196,18 @@ class TAGANDataset:
             )
 
         return (
-            ((x_data, x_future), (None, None)), 
+            ((x_data, x_future), (None, None)),
             ((y_data, y_future), (None, None)),
-            ((a_data, a_future), (None, None))
+            ((a_data, a_future), (None, None)),
         )
 
-    def onehot_encoding(self, data: pd.DataFrame, value: pd.DataFrame, cat_col: str) -> pd.DataFrame:
+    def onehot_encoding(
+        self, data: pd.DataFrame, value: pd.DataFrame, cat_col: str
+    ) -> pd.DataFrame:
         if cat_col in data.columns:
             cat_data = data[cat_col]
             data = data.drop(cat_col, axis=1)
-            
+
         encoded = one_hot(cat_data)
         return data, encoded
 
@@ -231,11 +235,11 @@ class TAGANDataset:
         self.origin_max = data.max(0)
         self.origin_min = data.min()
 
-        cutting_data = data # .copy()
+        cutting_data = data  # .copy()
         for col in data.columns:
             unique_values = sorted(cutting_data[col].unique())
             percent = 0.02
-            cut_idx = int(len(unique_values) * percent) 
+            cut_idx = int(len(unique_values) * percent)
             front_two = unique_values[:cut_idx]
             back_two = unique_values[-cut_idx:]
             for i, value in enumerate(cutting_data[col]):
@@ -243,27 +247,30 @@ class TAGANDataset:
                     cutting_data[col][i] = unique_values[cut_idx - 1]
                 elif value in back_two:
                     cutting_data[col][i] = unique_values[-cut_idx]
-                    
+
         self.max = cutting_data.max(0) * 1.01
         self.min = cutting_data.min(0) * 0.99
 
         data = data - self.min
         data = data / (self.max - self.min)
         data = 2 * data - 1
-        
+
         self.decoder_max = torch.tensor(self.max[self.targets])
         self.decoder_min = torch.tensor(self.min[self.targets])
-        
+
         self.min = torch.tensor(self.min)
         self.max = torch.tensor(self.max)
-        
+
         print("-----  Min Max information  -----")
-        df_minmax = pd.DataFrame({
-            'MIN': self.origin_min,
-            f'min ({(percent) * 100})': self.decoder_min,
-            f'max ({(1 - percent) * 100})': self.decoder_max,
-            'MAX': self.origin_max,
-        }, index=self.targets)
+        df_minmax = pd.DataFrame(
+            {
+                "MIN": self.origin_min,
+                f"min ({(percent) * 100})": self.decoder_min,
+                f"max ({(1 - percent) * 100})": self.decoder_max,
+                "MAX": self.origin_max,
+            },
+            index=self.targets,
+        )
         print(df_minmax.T)
 
         return data
@@ -310,7 +317,7 @@ class TAGANDataset:
     def get_sample(self, x, netG):
         y = netG(x).to(self.device)
         return y
-    
+
     def get_random_sample(self, netG):
         idx = np.random.randint(self.shape)
         data = self.train_dataset[idx]
@@ -329,5 +336,3 @@ class TAGANDataset:
 
     def __getitem__(self, idx):
         return self.train_dataset[idx]
-
-    

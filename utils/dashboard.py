@@ -29,7 +29,11 @@ class Dashboard_v2:
         NROWS = 1 + (self.decode_dim - 1) // self.feature_by_rows
 
         fig, ax = plt.subplots(
-            NROWS, 1, figsize=(20, 10), facecolor="lightgray", sharex=True,
+            NROWS,
+            1,
+            figsize=(20, 10),
+            facecolor="lightgray",
+            sharex=True,
         )
         fig.tight_layout()
 
@@ -66,11 +70,11 @@ class Dashboard_v2:
 
         true = true[0].cpu()
         REAL_GRAPH = np.concatenate([self.true_data, true])
-        
+
         batch_size = int(window.shape[0])
         for b in range(batch_size):
             fig, ax = self.reset_figure()
-            
+
             upto = self.window_len + b
             preds = pred[b].cpu().detach().numpy()
             PRED_GRAPH = np.concatenate([self.pred_list[b], preds])
@@ -78,8 +82,20 @@ class Dashboard_v2:
                 idx_s = i * self.feature_by_rows
                 idx_e = min((i + 1) * self.feature_by_rows, len(self.target_col))
                 for f in range(idx_s, idx_e):
-                    ax_.plot(REAL_GRAPH[:upto, f], color=f"C{f}", alpha=0.2, linewidth=3, label=f"Real {self.target_col[f]}")
-                    ax_.plot(PRED_GRAPH[:upto, f], color=f"C{f}", alpha=1, linewidth=1, label=f"Fake {self.target_col[f]}")
+                    ax_.plot(
+                        REAL_GRAPH[:upto, f],
+                        color=f"C{f}",
+                        alpha=0.2,
+                        linewidth=3,
+                        label=f"Real {self.target_col[f]}",
+                    )
+                    ax_.plot(
+                        PRED_GRAPH[:upto, f],
+                        color=f"C{f}",
+                        alpha=1,
+                        linewidth=1,
+                        label=f"Fake {self.target_col[f]}",
+                    )
                 # # Legend
                 ax_.legend(loc="upper left")
             # # Set Y limit by min-max

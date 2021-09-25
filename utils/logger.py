@@ -8,7 +8,8 @@ timestamper = structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S", utc=Fals
 pre_chain = [structlog.stdlib.add_log_level, timestamper]
 
 today = datetime.datetime.today()
-logtime = (today).strftime('%Y%m%d')
+logtime = (today).strftime("%Y%m%d")
+
 
 class Logger:
     def __init__(self, file):
