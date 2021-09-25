@@ -119,7 +119,7 @@ class TAGANBand:
             data,
             batch_size=dataset.batch_size,
             num_workers=dataset.workers,
-            shuffle=False,  # True if train else False,
+            shuffle=False
         )
         return dataloader
 
@@ -155,53 +155,61 @@ class TAGANBand:
 
     def train(self):
         logger.info("Train the model")
-        train_score_plot = []
-        valid_score_plot = []
+        try:
+            train_score_plot = []
+            valid_score_plot = []
 
-        BEST_COUNT = 20
-        BEST_SCORE = 0.27
+            BEST_COUNT = 20
+            BEST_SCORE = 0.28
 
-        EPOCHS = self.base_epochs + self.iter_epochs
-        for epoch in range(self.base_epochs, EPOCHS):
-            # Train Section
-            tqdm_train = tqdm(self.train_loader, loss_info("Train", epoch))
-            train_score = self.trainer.train_step(tqdm_train, epoch, training=True)
-            train_score_plot.append(train_score)
+            EPOCHS = self.base_epochs + self.iter_epochs
+            for epoch in range(self.base_epochs, EPOCHS):
+                # Train Section
+                tqdm_train = tqdm(self.train_loader, loss_info("Train", epoch))
+                train_score = self.trainer.train_step(tqdm_train, epoch, training=True)
+                train_score_plot.append(train_score)
 
-            # Valid Section
-            tqdm_valid = tqdm(self.valid_loader, loss_info("Valid", epoch))
-            valid_score = self.trainer.train_step(tqdm_valid, epoch, training=False)
-            valid_score_plot.append(valid_score)
+                # Valid Section
+                tqdm_valid = tqdm(self.valid_loader, loss_info("Valid", epoch))
+                valid_score = self.trainer.train_step(tqdm_valid, epoch, training=False)
+                valid_score_plot.append(valid_score)
 
-            if self.save:
-                # periodic Model save
-                model_path = os.path.join(self.model_path, self.model_tag)
-                if ((epoch + 1) % self.save_interval) == 0:
-                    logger.info(
-                        f"[Epoch {epoch + 1:4d}]*** MODEL IS SAVED ***"
-                        f"(T {train_score:.4f}, V {valid_score:.4f})"
-                    )
+                if self.save:
+                    # periodic Model save
+                    model_path = os.path.join(self.model_path, self.model_tag)
                     if not os.path.exists(model_path):
                         os.mkdir(model_path)
-
-                    # Model save
-                    self.save_model(model_path)
-                    
-                # Best Model save
-                if valid_score < BEST_SCORE:
-                    BEST_SCORE = valid_score
-                    BEST_COUNT = 20
-                    logger.info(f"*** BEST SCORE MODEL ({BEST_SCORE:.4f}) IS SAVED ***")
-                    self.save_model(model_path, postfix=f"_{BEST_SCORE:.4f}")
-                else:
-                    BEST_COUNT -= 1
-                    if BEST_COUNT == 0:
-                        BEST_COUNT = 20
+                    if ((epoch + 1) % self.save_interval) == 0:
                         logger.info(
-                            f"*** BEST SCORE MODEL ({BEST_SCORE:.4f}) IS RELOADED ***"
+                            f"[Epoch {epoch + 1:4d}]*** MODEL IS SAVED ***"
+                            f"(T {train_score:.4f}, V {valid_score:.4f})"
                         )
-                        self.netD = torch.load(f"{model_path}/netD_{BEST_SCORE:.4f}.pth")
-                        self.netG = torch.load(f"{model_path}/netG_{BEST_SCORE:.4f}.pth")
+
+                        # Model save
+                        self.save_model(model_path)
+                        
+                    # Best Model save
+                    if valid_score < BEST_SCORE:
+                        BEST_SCORE = valid_score
+                        BEST_COUNT = 20
+                        logger.info(f"*** BEST SCORE MODEL ({BEST_SCORE:.4f}) IS SAVED ***")
+                        self.save_model(model_path, postfix=f"_{BEST_SCORE:.4f}")
+                    else:
+                        BEST_COUNT -= 1
+                        if BEST_COUNT == 0:
+                            BEST_COUNT = 20
+                            logger.info(
+                                f"*** BEST SCORE MODEL ({BEST_SCORE:.4f}) IS RELOADED ***"
+                            )
+                            self.netD = torch.load(f"{model_path}/netD_{BEST_SCORE:.4f}.pth")
+                            self.netG = torch.load(f"{model_path}/netG_{BEST_SCORE:.4f}.pth")
+        except:
+            pass
+        finally:
+            self.netD = torch.load(f"{model_path}/netD_{BEST_SCORE:.4f}.pth")
+            self.netG = torch.load(f"{model_path}/netG_{BEST_SCORE:.4f}.pth")
+            logger.info("Saving Best model...")                
+            self.save_model(model_path)
 
         plt.plot(train_score_plot, label="train_score")
         plt.plot(valid_score_plot, label="val_score")
@@ -359,7 +367,15 @@ class TAGAN_Trainer:
 
     def train_step(self, tqdm, epoch, training=True):
         TAG = "Train" if training else "Valid"
-        losses = {"G": 0, "D": 0, "l1": 0, "l2": 0, "GP": 0, "Score": 0}
+        losses = {
+            "G": 0, "D": 0, "l1": 0, "l2": 0, "GP": 0, 
+            "Score": 0,
+            "Score1": 0,
+            "Score2": 0,
+            "Score3": 0,
+            "Score4": 0,
+            "ScoreAll": 0,
+        }
 
         if not training and self.visual:
             self.dashboard.close_figure()
@@ -419,10 +435,18 @@ class TAGAN_Trainer:
 
             # Scoring
             window = a_window.cpu()
-            true = a_future.cpu()
+            # true = a_future.cpu()
+            true = self.dataset.denormalize(y_future.cpu())
+            if 0 in true:
+                print(true)
             pred = self.dataset.denormalize(y_gen.cpu())
             
-            score = self.metric.NMAE(pred, true).detach().numpy()
+            score = self.metric.NMAE(pred, true, real_test=True).detach().numpy()
+            score1 = self.metric.NMAE(pred[:, 0], true[:, 0]).detach().numpy()
+            score2 = self.metric.NMAE(pred[:, 6], true[:, 6]).detach().numpy()
+            score3 = self.metric.NMAE(pred[:, 13], true[:, 13]).detach().numpy()
+            score4 = self.metric.NMAE(pred[:, 27], true[:, 27]).detach().numpy()
+            score_all = self.metric.NMAE(pred, true).detach().numpy()
 
             # Losses Log
             losses["D"] += errD
@@ -431,42 +455,54 @@ class TAGAN_Trainer:
             losses["l2"] += err_l2
             losses["GP"] += err_gp
             losses["Score"] += score
+            losses["Score1"] += score1
+            losses["Score2"] += score2
+            losses["Score3"] += score3
+            losses["Score4"] += score4
+            losses["ScoreAll"] += score_all
 
             tqdm.set_description(loss_info(TAG, epoch, losses, i))
             if not training and self.visual is True:
                 self.dashboard.initalize(window)
                 self.dashboard.visualize(window, true, pred)
 
-        if not training:
-            if ((epoch + 1) % self.print_interval) == 0:
-                true_info = true[0, 0, :].detach().numpy()
-                pred_info = pred[0, 0, :].detach().numpy()
-                diff_info = true_info - pred_info
-                results = pd.DataFrame(
-                    {
-                        "true": true_info,
-                        "pred": pred_info,
-                        "diff": diff_info,
-                        "perc": 100 * diff_info / true_info,
-                    }, index=self.dataset.targets
-                )
-                logger.info(
-                    f"-----  Result (e{epoch + 1:4d})  -----"
-                    f"\n{results.T}\n"
-                    f"Sum(Diff/True) {abs(sum(results['diff'])):.2f}/{sum(results['true']):.2f}"
-                    f"({sum(abs(results['diff']))/sum(results['true'])*100:.2f}%)"
-                )
+        if not training and ((epoch + 1) % self.print_interval) == 0:
+            true_info = true[0, 0, :].detach().numpy()
+            pred_info = pred[0, 0, :].detach().numpy()
+            diff_info = true_info - pred_info
+            results = pd.DataFrame(
+                {
+                    "true": true_info,
+                    "pred": pred_info,
+                    "diff": diff_info,
+                    "perc": 100 * diff_info / true_info,
+                }, index=self.dataset.targets
+            )
+            logger.info(
+                f"-----  Result (e{epoch + 1:4d}) +1 day -----"
+                f"\n{results.T}\n"
+                f"Sum(Diff/True) {abs(sum(results['diff'])):.2f}/{sum(results['true']):.2f}"
+                f"({sum(abs(results['diff']))/sum(results['true'])*100:.2f}%)"
+            )
 
         return losses["Score"] / (i + 1)
 
 
 def loss_info(process, epoch, losses=None, i=0):
     if losses is None:
-        losses = {"G": 0, "D": 0, "l1": 0, "l2": 0, "GP": 0, "Score": 0}
+        losses = {
+            "G": 0, "D": 0, "l1": 0, "l2": 0, "GP": 0, "Score": 0,
+            "Score1": 0, "Score2": 0, "Score3": 0, "Score4": 0, "ScoreAll": 0
+        }
 
     return (
         f"[{process} e{epoch + 1:4d}]"
-        f"Score {losses['Score']/(i+1):7.4f} "
+        f"Score {losses['Score']/(i+1):7.4f}("
+        f"all {losses['ScoreAll']/(i+1):5.2f} "
+        f"1d {losses['Score1']/(i+1):5.2f} "
+        f"1w {losses['Score2']/(i+1):5.2f} "
+        f"2w {losses['Score3']/(i+1):5.2f} "
+        f"4w {losses['Score4']/(i+1):5.2f})"
         f"D {losses['D']/(i+1):7.3f} "
         f"G {losses['G']/(i+1):7.3f} "
         f"L1 {losses['l1']/(i+1):6.3f} "

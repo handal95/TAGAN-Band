@@ -20,15 +20,15 @@ class TAGAN_Metric:
     def GANloss(self, D, target_is_real):
         return self.criterion_adv(D, target_is_real)
 
-    def NMAE(self, pred, true):
-        # pred = pred[:, [6, 13, 27]]
-        # true = true[:, [6, 13, 27]]
+    def NMAE(self, pred, true, real_test=False):
+        if real_test:
+            pred = pred[:, [6, 13, 27]]
+            true = true[:, [6, 13, 27]]
+            pred, true = self._ignore_zero(pred, true)
+            return torch.mean(torch.abs((true - pred)) / (true))
+
         pred, true = self._ignore_zero(pred, true)
-
-        if len(true) == 0:
-            return torch.tensor(0.0)
-
-        return torch.mean(torch.abs((true - pred)) / (true))
+        return torch.mean((true - pred) / (true))
 
     def l1loss(self, pred, true):
         pred, true = self._ignore_zero(pred, true)

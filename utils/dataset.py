@@ -136,25 +136,31 @@ class TAGANDataset:
 
         weekday_data = data[self.key].dt.day_name()
         if self.weekday in data.columns:
-            weekday_data = data[self.weekday]
+            # weekday_data = data[self.weekday]
             data = data.drop(self.weekday, axis=1)
 
         data.set_index(self.key)
         data = data.drop(self.key, axis=1)
-        
+
         # Normalize
         logger.info(f"  - Scaler : Min-Max")
         answer = data[self.targets].copy()
+        
+        data = self.imputate_zero_value(data)
+        
+        # print(data.iloc[:60])
+        data.to_csv("./data/outputs/imputed.csv")
         data = self.normalize(data)
 
         month_encode = one_hot(month_data)
         weekday_encode = one_hot(weekday_data)
         data = pd.concat([data, month_encode], axis=1)
         data = pd.concat([data, weekday_encode], axis=1)
+        data.to_csv("./data/outputs/processed.csv")
         
         # X Y Split - Custom for dataset
         x_data = data
-        y_data = data[self.targets]
+        y_data = data[self.targets].copy()
         
         # Windowing
         a_data, a_future = self.windowing(answer)
@@ -228,17 +234,18 @@ class TAGANDataset:
         cutting_data = data # .copy()
         for col in data.columns:
             unique_values = sorted(cutting_data[col].unique())
-            two_percent = int(len(unique_values) * 0.02) 
-            front_two = unique_values[:two_percent]
-            back_two = unique_values[-two_percent:]
+            percent = 0.02
+            cut_idx = int(len(unique_values) * percent) 
+            front_two = unique_values[:cut_idx]
+            back_two = unique_values[-cut_idx:]
             for i, value in enumerate(cutting_data[col]):
                 if value in front_two:
-                    cutting_data[col][i] = unique_values[two_percent - 1]
+                    cutting_data[col][i] = unique_values[cut_idx - 1]
                 elif value in back_two:
-                    cutting_data[col][i] = unique_values[-two_percent]
+                    cutting_data[col][i] = unique_values[-cut_idx]
                     
-        self.max = cutting_data.max(0)
-        self.min = cutting_data.min()
+        self.max = cutting_data.max(0) * 1.01
+        self.min = cutting_data.min(0) * 0.99
 
         data = data - self.min
         data = data / (self.max - self.min)
@@ -252,10 +259,10 @@ class TAGANDataset:
         
         print("-----  Min Max information  -----")
         df_minmax = pd.DataFrame({
-            'origin_min': self.origin_min,
-            'origin_max': self.origin_max,
-            'min': self.decoder_min,
-            'max': self.decoder_max,
+            'MIN': self.origin_min,
+            f'min ({(percent) * 100})': self.decoder_min,
+            f'max ({(1 - percent) * 100})': self.decoder_max,
+            'MAX': self.origin_max,
         }, index=self.targets)
         print(df_minmax.T)
 
@@ -278,6 +285,28 @@ class TAGANDataset:
             data[batch] = batch_denorm
 
         return data
+
+    def imputate_zero_value(self, data):
+        for col in data:
+            for row in range(len(data[col])):
+                if data[col][row] <= 0:
+                    yesterday = data[col][max(0, row - 1)]
+                    last_week = data[col][max(0, row - 7)]
+                    last_year = data[col][max(0, row - 365)]
+                    candidates = [yesterday, last_week, last_year]
+                    try:
+                        while 0 in candidates:
+                            candidates.remove(0)
+                    except ValueError:
+                        pass
+                    if len(candidates) == 0:
+                        mean_value = 0
+                    else:
+                        mean_value = np.mean(candidates)
+                    data[col][row] = mean_value
+
+        return data
+
 
     def __len__(self):
         return self.length
