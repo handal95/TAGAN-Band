@@ -36,7 +36,8 @@ class TAGANTrainer:
         
         self.data = None
         self.answer = None
-        
+        self.future_data = None
+        self.data_gamma = np.array([self.amplifier]) #  np.ones((self.dataset.decode_dims))
 
     def set_config(self, config: dict = None) -> dict:
         """
@@ -60,6 +61,8 @@ class TAGANTrainer:
         self.base_epochs = config["epochs"]["base"]
         self.iter_epochs = config["epochs"]["iter"]
         self.iter_critic = config["epochs"]["critic"]
+        
+        self.amplifier = config["amplifier"]
 
         # Print option
         self.print_verbose = print_cfg["verbose"]
@@ -68,6 +71,73 @@ class TAGANTrainer:
         # Visual option
         self.visual = config["visual"]
         self.print_cfg = config["print"]
+        
+    def inference(self, netG, dataset):
+        logger.info("Predict the data")
+
+        pred_tqdm = tqdm(dataset)
+        def generate(x):
+            return netG(x).to(self.device)
+        
+        self.data = None
+        self.answer = None
+        for i, data in enumerate(pred_tqdm):
+            true_x = data["encode"].to(self.device)
+            print(true_x.shape)
+            fake_y = generate(true_x)
+            
+            pred = self.dataset.denormalize(fake_y.cpu())
+            for f in range(self.dataset.decode_dims):
+                pred[:,:,f] = pred[:,:,f] * self.data_gamma[f]
+
+            self.eval(pred)
+            # self.predict(pred_y)
+
+            batch_size = pred.shape[0]
+            future_size = pred.shape[1]
+            feature_dim = pred.shape[2]
+            pred = pred.reshape((-1, future_size, feature_dim))
+            preds = np.concatenate([
+                self.future_data[-batch_size-future_size:].detach().numpy(), 
+                np.zeros((batch_size, future_size, feature_dim))
+            ])
+
+            if self.answer is None:
+                self.answer = np.zeros((batch_size + future_size - 1, future_size, feature_dim))
+                self.index = 0
+            else:
+                self.answer = np.concatenate(
+                    [self.answer, np.zeros((batch_size, future_size, feature_dim))], 
+                )
+
+            for f in range(future_size):
+                self.answer[self.index + f: self.index + f + batch_size, f] = preds[batch_size:2*batch_size, f]
+            self.index += batch_size
+
+        answer = self.answer.reshape(-1, future_size)
+        answer[answer == 0] = np.nan
+        mean_value = np.nanmean(answer, axis=1).reshape((-1, 1))
+
+        times = pd.DataFrame(self.dataset.preds_times.reshape(-1, 1))
+        output = pd.DataFrame(mean_value)
+        
+        output = pd.concat([times, output], axis=1)
+
+        return output
+
+    def eval(self, pred):
+        batch_size = pred.shape[0]
+        window_size = pred.shape[1]
+        future_size = pred.shape[1]
+        feature_dim = pred.shape[2]
+
+        pred = pred.reshape((-1, future_size, feature_dim))
+        if self.future_data is None:
+            empty = torch.empty(pred.shape)
+            self.future_data = torch.cat([empty, pred])
+            return
+        self.future_data = torch.cat([self.future_data, pred])
+
 
     def run(self, netD, netG, trainset, validset):
         logger.info("Train the model")
@@ -107,7 +177,8 @@ class TAGANTrainer:
         netD_best, netG_best = self.models.load(postfix=f"{best_score:.4f}")
         self.models.save(netD_best, netG_best)
 
-        self.plot_score(train_score_plot, valid_score_plot)
+        return netD, netG
+        # self.plot_score(train_score_plot, valid_score_plot)
         
     def train_step(self, tqdm, epoch, training=True):
         def discriminate(x):
@@ -153,11 +224,12 @@ class TAGANTrainer:
 
             # #######################            
             # Discriminator Training
-            # #######################            
+            # #######################
             Dx = discriminate(true_y)
             errD_real = self.metric.GANloss(Dx, target_is_real=True)
 
             fake_y = generate(true_x)
+
             Dy = discriminate(fake_y)
             errD_fake = self.metric.GANloss(Dy, target_is_real=False)
             errD = errD_real + errD_fake
@@ -190,13 +262,13 @@ class TAGANTrainer:
             losses["l2"] += err_l2
             losses["GP"] += err_gp
             
-
             # #######################            
             # Scoring
-            # #######################          
+            # #######################
             pred_y = self.dataset.denormalize(fake_y.cpu())
-            
-            pred_y = pred_y * 1.3
+            for f in range(self.dataset.decode_dims):
+                pred_y[:,:,f] = pred_y[:,:,f] * self.data_gamma[f]
+
             if not training:
                 self.data_concat(real_x, real_y, pred_y)
                 self.predict(pred_y)
@@ -314,10 +386,37 @@ class TAGANTrainer:
         self.data["true"] = torch.cat([self.data["true"], true[:, -1]])
         self.data["pred"] = torch.cat([self.data["pred"], pred])
         
-    def predict(self, pred_y):
-        batch_size = pred_y.shape[0]
-        future_size = pred_y.shape[1]
-        feature_dim = pred_y.shape[2]
+    def predict(self, pred):
+        batch_size = pred.shape[0]
+        future_size = pred.shape[1]
+        feature_dim = pred.shape[2]
+
+        pred = pred.reshape((-1, future_size, feature_dim))
+
+        preds = np.concatenate([
+            self.data["pred"][-batch_size-future_size:].detach().numpy(), 
+            np.zeros((batch_size, future_size, feature_dim))
+        ])
+        
+        if self.answer is None:
+            self.answer = np.zeros((batch_size + future_size - 1, future_size, feature_dim))
+            self.index = 0
+        else:
+            self.answer = np.concatenate(
+                [self.answer, np.zeros((batch_size, future_size, feature_dim))], 
+            )
+
+        for f in range(future_size):
+            self.answer[self.index + f: self.index + f + batch_size, f] = preds[batch_size:2*batch_size, f]
+
+        self.index += batch_size
+
+    def predict(self, pred):
+        batch_size = pred.shape[0]
+        future_size = pred.shape[1]
+        feature_dim = pred.shape[2]
+
+        pred = pred.reshape((-1, future_size, feature_dim))
 
         preds = np.concatenate([
             self.data["pred"][-batch_size-future_size:].detach().numpy(), 
@@ -393,7 +492,7 @@ class TAGANTrainer:
             _week2_score = torch.sum(week2[~torch.any(week2.isnan(),dim=1)])/torch.count_nonzero(true[~torch.any(week2.isnan(),dim=1)])
             _week4_score = torch.sum(week4[~torch.any(week4.isnan(),dim=1)])/torch.count_nonzero(true[~torch.any(week4.isnan(),dim=1)])
 
-            result = np.array([[
+            abs_mean_err = np.array([[
                 mean_score,
                 median_score,
                 (week1_score+week2_score+week4_score)/3, 
@@ -402,7 +501,7 @@ class TAGANTrainer:
                 week4_score
             ]])
 
-            _result = np.array([[
+            mean_err = np.array([[
                 _mean_score,
                 _median_score,
                 (_week1_score+_week2_score+_week4_score)/3, 
@@ -411,22 +510,37 @@ class TAGANTrainer:
                 _week4_score,
             ]])
             
-            result = result.reshape(-1, 1)
-            _result = _result.reshape(-1, 1)
+            mean_err = mean_err.reshape(-1, 1)
+            abs_mean_err = abs_mean_err.reshape(-1, 1)
+            
+            self.data_gamma[f] += mean_err[0] * abs_mean_err [0]
 
-            result = np.concatenate([result, _result], axis=1)
+            abs_mean_err = np.concatenate([abs_mean_err, mean_err], axis=1)
             if results is None:
-                results = pd.DataFrame(result)
+                results = pd.DataFrame(abs_mean_err)
             else:
-                results = pd.DataFrame(np.concatenate([results, result], axis=1))
+                results = pd.DataFrame(np.concatenate([results, abs_mean_err], axis=1))
         
         mean = results.mean(axis=1).values.reshape((-1, 1))
         results = pd.DataFrame(
             np.concatenate([results, mean], axis=1)
         )
         results = results.set_axis(['Mean', 'Median','Week124', 'Week1', 'Week2', 'Week4'], axis=0)
-        logger.info(results)
-            
+
+        # mean_error = results.iloc[0, 0]
+        # mean_std = results.iloc[0, 1]
+        mean_error = 1
+        mean_std = 0        
+        data_gamma_delta = mean_error * mean_std
+        next_gamma = self.data_gamma + data_gamma_delta
+
+        logger.info(f"\n{results}")
+        
+        data_gamma_df = pd.DataFrame(self.data_gamma)
+        logger.info(f"Data Gamma \n{data_gamma_df.T}")
+        # self.data_gamma = next_gamma
+
+        
             # mean = mean.numpy()
             # median = median.numpy()
             # # Log options

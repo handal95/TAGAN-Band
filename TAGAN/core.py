@@ -35,6 +35,15 @@ class TAGANCore:
 
         # Metric option
         self.metric = TAGANMetric(self.metric_cfg, self.device)
+        
+        # Trainer option
+        self.trainer = TAGANTrainer(
+            self.trainer_cfg,
+            self.dataset,
+            self.models,
+            self.metric,
+            self.device,
+        )
 
         # self.dashboard = Dashboard_v2(self.dataset)
 
@@ -64,23 +73,24 @@ class TAGANCore:
         self.metric_cfg = config["metric"]
         self.trainer_cfg = config["trainer"]
 
-    def run(self):
-        logger.info("Inference the future")
+    def run(self, netG=None):
+        predsset = self.dataset.loader(self.batch_size, self.workers, preds=True)
+        if netG == None:
+            _, netG = self.models.load('0.1989')
+        
+        output = self.trainer.inference(netG, predsset)
+        
+        output.to_csv("./미나리.csv", index=False)
+        
+        # encoder_input = encoder_input.to(self.device)
+        # decoder_input = torch.zeros([1, future_size+1, target_n], dtype=torch.float32).to(device)
+        # output = model(encoder_input, decoder_input, False)
+        # return output.cpu()
 
     def train(self) -> None:
-        logger.info("Train the model")
-        
-        trainer = TAGANTrainer(
-            self.trainer_cfg,
-            self.dataset,
-            self.models,
-            self.metric,
-            self.device,
-        )
-
         trainset = self.dataset.loader(self.batch_size, self.workers, train=True)
         validset = self.dataset.loader(self.batch_size, self.workers)
-        netD, netG = trainer.run(
+        netD, netG = self.trainer.run(
             self.netD,
             self.netG,
             trainset,

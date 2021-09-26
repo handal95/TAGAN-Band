@@ -61,7 +61,7 @@ class TAGANDataset:
         self.device = device
 
         # Load Data
-        train_set, valid_set = self.load_data()
+        train_set, valid_set, preds_set = self.load_data()
         
         # Feature info
         self.shape = train_set['decode'].shape
@@ -75,7 +75,7 @@ class TAGANDataset:
         # Dataset
         self.train_dataset = Dataset(train_set, self.device)
         self.valid_dataset = Dataset(valid_set, self.device)
-
+        self.preds_dataset = Dataset(preds_set, self.device)
 
     def set_config(self, config: dict) -> None:
         """
@@ -102,8 +102,12 @@ class TAGANDataset:
         self.window_len = config["window_len"]
         self.future_len = config["future_len"]
 
-        self.train_option = config["train"]["opt"]
-        self.split_rate = config["train"]["split_rate"]
+        self.split_rate = config["split_rate"]
+        
+        # Preprocess
+        self.log = config["log"]
+        self.cutoff_min = config["cutoff"]["min"]
+        self.cutoff_max = config["cutoff"]["max"]
 
     def load_data(self) -> typing.Tuple:
         # Read csv data
@@ -114,13 +118,6 @@ class TAGANDataset:
 
         logger.info(f"  - File   : {self.data_path}")
         logger.info(f"  - Length : {self.length}")
-
-        self.data = data
-        train_set, valid_set = self.preprocess(data)
-
-        return train_set, valid_set
-
-    def preprocess(self, data: pd.DataFrame) -> typing.Tuple:
         logger.info(f"  - Index  : {self.index_col}")
         logger.info(f"  - Target : ({len(self.targets)} items)\n{self.targets}")
         data[self.index_col] = pd.to_datetime(data[self.index_col])
@@ -137,6 +134,8 @@ class TAGANDataset:
             data = data.drop(self.weekday, axis=1)
 
         data.set_index(self.index_col)
+        self.times = data[self.index_col]
+        
         data = data.drop(self.index_col, axis=1)
         # data = data.drop("팽이버섯_wind", axis=1)
 
@@ -167,37 +166,46 @@ class TAGANDataset:
         window, future = self.windowing(real_data)
         
         # When the train option is on, split train and valid data
-        if self.train_option:
-            split_idx = max(int(len(data) * self.split_rate), self.future_len + 1)
-            logger.info(
-                f"  - Split  : Train({self.split_rate:.2f}), Valid({1 - self.split_rate:.2f})"
-            )
+        split_idx = max(int(len(data) * self.split_rate), self.future_len + 1)
+        logger.info(
+            f"  - Split  : Train({self.split_rate:.2f}), Valid({1 - self.split_rate:.2f}) / Real({-2 * self.future_len})"
+        )
 
-            # Train
-            train_set = {
-                "encode": encode[: split_idx - self.future_len],
-                "decode": decode[: split_idx - self.future_len],
-                "window": window[: split_idx - self.future_len],
-                "future": future[: split_idx - self.future_len]
-            }
-
-            # Train
-            valid_set = {
-                "encode": encode[split_idx: ],
-                "decode": decode[split_idx: ],
-                "window": window[split_idx: ],
-                "future": future[split_idx: ]
-            }
-            
-            return train_set, valid_set
-
-        data_set = {
-            "encode": encode,
-            "decode": decode,
-            "window": window,
-            "future": future
+        # Train
+        train_set = {
+            "encode": encode[: split_idx - self.future_len],
+            "decode": decode[: split_idx - self.future_len],
+            "window": window[: split_idx - self.future_len],
+            "future": future[: split_idx - self.future_len]
         }
-        return data_set, data_set
+        self.train_times = self.get_time_arange(self.times[:split_idx - 2 * self.future_len])
+
+        # Train
+        valid_set = {
+            "encode": encode[split_idx: -1],
+            "decode": decode[split_idx: -1],
+            "window": window[split_idx: -1],
+            "future": future[split_idx: -1]
+        }
+        self.valid_times = self.get_time_arange(self.times[split_idx: - 1])
+        
+        # Preds
+        preds_set = {
+            "encode": encode[-2 * self.future_len:],
+            "decode": decode[-2 * self.future_len:],
+            "window": window[-2 * self.future_len:],
+            "future": future[-2 * self.future_len:],
+        }
+        self.preds_times = self.get_time_arange(self.times[-2 * self.future_len:])
+
+        return train_set, valid_set, preds_set
+
+    def get_time_arange(self, times):
+        first_day = times.values[0] + np.timedelta64(1, 'D')
+        last_day = times.values[-1] + np.timedelta64(1 + self.future_len, 'D')
+        time_arange = np.arange(first_day, last_day, dtype='datetime64[D]')
+        return time_arange
+
 
     def onehot_encoding(
         self, data: pd.DataFrame, value: pd.DataFrame, cat_col: str
@@ -228,51 +236,49 @@ class TAGANDataset:
     def normalize(self, data):
         """Normalize input in [-1,1] range, saving statics for denormalization"""
         # 2 * (x - x.min) / (x.max - x.min) - 1
-        # data = np.log10(data + 1)
 
-        self.origin_max = data.max(0)
-        self.origin_min = data.min()
-        self.max = data.max(0)
-        self.min = data.min()
-        percent = 0.02
-        logger.info(f"Cutting : {percent}")
+        origin_max = data.max(0)
+        origin_min = data.min()
+        min_p = self.cutoff_min
+        max_p = self.cutoff_max
+        logger.info(f"Cutting : Min {min_p*100} % , Max {max_p*100} %")
 
-        cutting_data = data  # .copy()
         for col in data.columns:
-            unique_values = sorted(cutting_data[col].unique())
-            cut_idx = int(len(unique_values) * percent)
-            front_two = unique_values[:cut_idx]
-            back_two = unique_values[-cut_idx:]
-            for i, value in enumerate(cutting_data[col]):
-                if value in front_two:
-                    cutting_data[col][i] = unique_values[cut_idx - 1]
-                # elif value in back_two:
-                #     cutting_data[col][i] = unique_values[-cut_idx]
+            uniques = sorted(data[col].unique())
+            pivot_min = uniques[1 + int(len(uniques) * min_p)]
+            pivot_max = uniques[-1 - int(len(uniques) * max_p)]
 
-        self.max = cutting_data.max(0)
-        self.min = cutting_data.min() * 0.9
+            data[col][data[col] < pivot_min] = pivot_min
+            data[col][data[col] > pivot_max] = pivot_max
+
+        if self.log:
+            data = np.log10(data + 1)
+
+        self.min = data.min()
+        self.max = data.max(0)
 
         data = data - self.min
         data = data / (self.max - self.min)
         data = 2 * data - 1
 
-        self.decode_max = torch.tensor(self.max[self.targets])
         self.decode_min = torch.tensor(self.min[self.targets])
+        self.decode_max = torch.tensor(self.max[self.targets])
 
         self.min = torch.tensor(self.min)
         self.max = torch.tensor(self.max)
 
-        print("-----  Min Max information  -----")
+        logger.info(f"- Log   : {self.log}")
+        logger.info("-----  Min Max information  -----")
         df_minmax = pd.DataFrame(
             {
-                "MIN": self.origin_min,
-                f"min ({(percent) * 100})": self.decode_min,
-                f"max ({(1 - percent) * 100})": self.decode_max,
-                "MAX": self.origin_max,
+                f"MIN": origin_min,
+                f"min ({min_p * 100})": self.decode_min,
+                f"max ({max_p * 100})": self.decode_max,
+                f"MAX": origin_max,
             },
             index=self.targets,
         )
-        print(df_minmax.T)
+        logger.info(df_minmax.T)
 
         return data
 
@@ -288,7 +294,9 @@ class TAGANDataset:
             batch_denorm = 0.5 * (batch_denorm + 1)
             batch_denorm = batch_denorm * delta
             batch_denorm = batch_denorm + self.decode_min
-            # batch_denorm = torch.pow(10, batch_denorm) - 1
+            
+            if self.log:
+                batch_denorm = torch.pow(10, batch_denorm) - 1
 
             data[batch] = batch_denorm
 
@@ -324,8 +332,10 @@ class TAGANDataset:
         
         return encode, decode
 
-    def loader(self, batch_size: int, n_workers: int, train: bool = False):
+    def loader(self, batch_size: int, n_workers: int, train: bool = False, preds: bool=False):
         dataset = self.train_dataset if train else self.valid_dataset
+        dataset = self.preds_dataset if preds else dataset
+        
         dataloader = DataLoader(dataset, batch_size, num_workers=n_workers)
         return dataloader
 

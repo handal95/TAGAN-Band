@@ -44,12 +44,14 @@ if __name__ == "__main__":
     model = TAGANCore(config=config)
 
     logger.info("- Model Running -")
+    netG = None
     try:
-        model.train()
-    except KeyboardInterrupt:
+        netD, netG = model.train()
+    except (KeyboardInterrupt, SyntaxError):
+        model.models.save(model.netD, model.netG)
         print("Abort!")
 
-    model.run()
+    model.run(netG)
 
     # get OUTPUT Option
     # output file path : ./output_{data_title}.csv

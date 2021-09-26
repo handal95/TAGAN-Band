@@ -131,3 +131,4 @@ data/
 models/pretrained/
 *.csv
 *.pkl
+*.pth
