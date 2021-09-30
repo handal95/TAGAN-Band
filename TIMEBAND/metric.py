@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 
-class TAGANMetric:
+class TIMEBANDMetric:
     def __init__(self, config, device):
         self.set_config(config)
         self.device = device
@@ -27,11 +27,9 @@ class TAGANMetric:
             _score = 0
             _count = 0
             for day in [6, 13, 27]:
-                _pred = pred[d+day]
-                _true = true[d+day]
+                _pred = pred[d + day]
+                _true = true[d + day]
                 _pred, _true = self._ignore_zero(_pred, _true)
-            
-                print(_true)
 
                 _score += torch.mean(torch.abs((_true - _pred)) / (_true))
                 _count += 1
@@ -39,8 +37,7 @@ class TAGANMetric:
             if _count > 0:
                 score += (_score) / (_count)
                 count += 1
-            print((score/count), end='\r')
-        return (score/count)
+        return score / count
 
     def NMAE(self, pred, true, real_test=False):
         if real_test:
@@ -51,7 +48,7 @@ class TAGANMetric:
 
         pred, true = self._ignore_zero(pred, true)
         return torch.mean((true - pred) / (true))
-    
+
     def l1loss(self, pred, true):
         pred, true = self._ignore_zero(pred, true)
         return self.l1_weight * self.criterion_l1n(pred, true)

@@ -4,12 +4,13 @@ import torch
 import random
 import numpy as np
 import pandas as pd
-from TAGAN.core import TAGANCore
+from TIMEBAND.core import TIMEBANDCore
 from utils.logger import Logger
 
 logger = Logger(__file__)
 
 torch.set_printoptions(precision=3, sci_mode=False)
+pd.set_option('mode.chained_assignment',  None)
 pd.options.display.float_format = "{:.3f}".format
 np.set_printoptions(linewidth=np.inf, precision=3, suppress=True)
 
@@ -34,25 +35,40 @@ def seeding(seed=31):
     logger.info(f"  Seed   : {seed}")
 
 
-if __name__ == "__main__":
-    logger.info("*** TAGAN-BAND ***")
-    logger.info("- System setting -")
+def launcher():
+    logger.info("*********************")
+    logger.info("***** TIME BAND *****")
+    logger.info("*********************\n\n")
+
+
+    logger.info("*********************")
+    logger.info("- System  Setting -")
+    logger.info("*********************")
     config = use_default_config("config/config.json")
     seeding(31)
 
+    logger.info("*********************")
     logger.info("- Model Setting -")
-    model = TAGANCore(config=config)
+    logger.info("*********************")
+    model = TIMEBANDCore(config=config)
 
+    logger.info("*********************")
     logger.info("- Model Running -")
+    logger.info("*********************")
+
     netG = None
     try:
         netD, netG = model.train()
     except (KeyboardInterrupt, SyntaxError):
         model.models.save(model.netD, model.netG)
-        print("Abort!")
+        logger.warn("Abort!")
 
+    logger.info("*********************")
+    logger.info("- Model Output -")
+    logger.info("*********************")
     model.run(netG)
+    model.clear()
 
-    # get OUTPUT Option
-    # output file path : ./output_{data_title}.csv
-    # model.get_labels(text=True)
+
+if __name__ == "__main__":
+    launcher()

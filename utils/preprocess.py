@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 
 
-def one_hot(cat_data: pd.Series, prefix="", postfix="") -> pd.DataFrame:
+def onehot_encoding(cat_data: pd.Series, prefix="", postfix="") -> pd.DataFrame:
     categories = sorted(set(cat_data))
     n_category = len(categories)
 
@@ -22,10 +22,10 @@ def one_hot(cat_data: pd.Series, prefix="", postfix="") -> pd.DataFrame:
     return df
 
 
-def one_hot_encoding(data):
-    mapping_set = {}
-    for i, d in enumerate(data.unique()):
-        mapping_set[d] = i
-    data = data.map(mapping_set)
-    data = data.astype("float")
-    return data
+# def one_hot_encoding(data):
+#     mapping_set = {}
+#     for i, d in enumerate(data.unique()):
+#         mapping_set[d] = i
+#     data = data.map(mapping_set)
+#     data = data.astype("float")
+#     return data

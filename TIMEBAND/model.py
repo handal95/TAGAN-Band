@@ -7,27 +7,30 @@ from .utils.lstm_layer import LSTMDiscriminator as NetD
 logger = Logger(__file__)
 
 
-class TAGANModel:
+class TIMEBANDModel:
     """
-    TAGAN Dataset
+    TIMEBAND Dataset
 
     """
 
     def __init__(self, config: dict, device: torch.device) -> None:
         """
-        TAGAN Dataset
+        TIMEBAND Dataset
 
         Args:
             config: Dataset configuration dict
             device: Torch device (cpu / cuda:0)
         """
-        logger.info("  Dataset: ")
+        logger.info("  Model: ")
 
         # Set Config
         self.set_config(config)
 
         # Set device
         self.device = device
+        
+        self.netD = None
+        self.netG = None
 
     def set_config(self, config: dict) -> None:
         """
@@ -57,27 +60,30 @@ class TAGANModel:
 
         self.hidden_dim = config["hidden_dim"]
 
-    def init_model(self, data_dims: tuple):
-        logger.info(f"Torch Model")
+    def load_model(self, data_dims: tuple):
+        if self.netD is not None and self.netG is not None:
+            return self.netD, self.netG
 
         hidden_dim = self.hidden_dim
-        enc_dim = data_dims["encode"]
-        dec_dim = data_dims["decode"]
+        enc_dim = data_dims["encoded"]
+        dec_dim = data_dims["decoded"]
         device = self.device
 
         try:
             if self.load_option is True:
-                netD, netG = self.load()
-                logger.info(f"   - Network : \n{netG} \n{netD}")
-                return netD, netG
+                self.netD, self.netG = self.load()
+                logger.info(f"   - Network : \n{self.netG} \n{self.netD}")
+                return self.netD, self.netG
 
         except FileNotFoundError:
 
-            netD = NetD(dec_dim, hidden_dim=hidden_dim, device=device).to(device)
-            netG = NetG(enc_dim, dec_dim, hidden_dim=hidden_dim, device=device).to(device)
+            self.netD = NetD(dec_dim, hidden_dim=hidden_dim, device=device).to(device)
+            self.netG = NetG(enc_dim, dec_dim, hidden_dim=hidden_dim, device=device).to(
+                device
+            )
 
-            logger.info(f"   - Network : \n{netG} \n{netD}")
-            return netD, netG
+            logger.info(f"   - Network : \n{self.netG} \n{self.netD}")
+            return self.netD, self.netG
 
     def load(self, postfix: str = "") -> tuple((NetD, NetG)):
         if self.load_option is False:
@@ -107,7 +113,7 @@ class TAGANModel:
 
         if score < self.best_score:
             self.best_score = score
-            score_tag = f'{self.best_score:.4f}'
+            score_tag = f"{self.best_score:.4f}"
             logger.info(f"*** BEST SCORE MODEL ({score_tag}) IS SAVED ***")
 
             self.save(netD, netG, postfix=score_tag)
@@ -116,7 +122,7 @@ class TAGANModel:
 
         self.current_counts += 1
         if self.current_counts >= self.reload_interval:
-            score_tag = f'{self.best_score:.4f}'
+            score_tag = f"{self.best_score:.4f}"
             logger.info(f"*** BEST SCORE MODEL ({score_tag}) IS RELOADED ***")
 
             netD, netG = self.load(postfix=score_tag)

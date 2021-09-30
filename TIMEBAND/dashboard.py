@@ -13,16 +13,16 @@ class Dashboard_v2:
         self.dataset = dataset
         self.target_col = self.dataset.targets
         self.decode_dim = self.dataset.decode_dim
-        self.window_len = self.dataset.window_len
-        self.future_len = self.dataset.future_len
-        self.scope = DELTA * self.window_len + self.future_len
+        self.observed_len = self.dataset.observed_len
+        self.forecast_len = self.dataset.forecast_len
+        self.scope = DELTA * self.observed_len + self.forecast_len
         self.feature_by_rows = 7
 
         self.fig, self.ax = self.init_figure()
         self.predicted = 0
 
         self.true_data = None
-        self.pred_list = [None] * self.future_len
+        self.pred_list = [None] * self.forecast_len
 
     def init_figure(self) -> tuple:
         # Config subplots
@@ -38,7 +38,7 @@ class Dashboard_v2:
         fig.tight_layout()
 
         if NROWS == 1:
-            subplot_title = f"TAGAN-Band Feature to {self.decode_dim}"
+            subplot_title = f"TIMEBAND-Band Feature to {self.decode_dim}"
             ax.set_title(subplot_title)
             ax = [ax]
         else:
@@ -47,7 +47,7 @@ class Dashboard_v2:
                 feature_to = feature_from + min(
                     self.decode_dim - feature_from, self.feature_by_rows
                 )
-                subplot_title = f"TAGAN-Band Feature {feature_from} to {feature_to}"
+                subplot_title = f"TIMEBAND-Band Feature {feature_from} to {feature_to}"
                 ax[row].set_title(subplot_title)
 
         return fig, ax
@@ -59,8 +59,8 @@ class Dashboard_v2:
         for batch in range(1, batch_size):
             self.true_data = np.concatenate([self.true_data, window[batch, -1:]])
 
-        self.pred_list = [None] * self.future_len
-        for f in range(self.future_len):
+        self.pred_list = [None] * self.forecast_len
+        for f in range(self.forecast_len):
             self.pred_list[f] = self.true_data[: batch_size + f]
 
     def visualize(self, window, true, pred) -> None:
@@ -75,7 +75,7 @@ class Dashboard_v2:
         for b in range(batch_size):
             fig, ax = self.reset_figure()
 
-            upto = self.window_len + b
+            upto = self.observed_len + b
             preds = pred[b].cpu().detach().numpy()
             PRED_GRAPH = np.concatenate([self.pred_list[b], preds])
             for i, ax_ in enumerate(ax):
@@ -109,11 +109,11 @@ class Dashboard_v2:
         # if self.pred_data.shape[0] == 15:
         #     print(self.pred_data)
 
-        # start = max(self.window_len, len(self.true_data) - self.scope + 1)
-        # base = max(0, len(pred) - self.future_len - start)
-        # # scope = max(0, len(self.true_data) - self.scope + self.future_len)
+        # start = max(self.observed_len, len(self.true_data) - self.scope + 1)
+        # base = max(0, len(pred) - self.forecast_len - start)
+        # # scope = max(0, len(self.true_data) - self.scope + self.forecast_len)
 
-        # plt.axvspan(base + DELTA * self.window_len, base + DELTA * self.window_len + self.future_len, alpha=0.2)
+        # plt.axvspan(base + DELTA * self.observed_len, base + DELTA * self.observed_len + self.forecast_len, alpha=0.2)
         # for i, ax_ in enumerate(ax):
         #     feature_from = i * self.feature_by_rows
         #     feature_to = feature_from + min(self.decode_dim - feature_from, self.feature_by_rows)
@@ -121,11 +121,11 @@ class Dashboard_v2:
         #     for j in range(feature_from, feature_to):
         #         label = self.target_col[j]
 
-        #         for future in range(0, self.future_len, 2):
-        #             # pred_scope = max(0, scope - self.window_len)
-        #             pred_scope = max(base, base - self.future_len)
+        #         for future in range(0, self.forecast_len, 2):
+        #             # pred_scope = max(0, scope - self.observed_len)
+        #             pred_scope = max(base, base - self.forecast_len)
         #             pred_j = np.concatenate([
-        #                 self.true_data[-DELTA * self.window_len - future:, j],
+        #                 self.true_data[-DELTA * self.observed_len - future:, j],
         #                 self.pred_data[-future - 1:, future, j]
         #             ])
         #             if self.scope < len(pred_j) - future:
@@ -134,17 +134,17 @@ class Dashboard_v2:
         #                 ])
 
         #             # pred_j = self.pred_data[pred_scope:, future, j]
-        #             ax_.plot(pred_j[future:], alpha=1, linewidth=(self.future_len - future) // 2 + 1, label=f"Pred {future} {label}")
+        #             ax_.plot(pred_j[future:], alpha=1, linewidth=(self.forecast_len - future) // 2 + 1, label=f"Pred {future} {label}")
 
-        # ax_.plot(self.true_data[-DELTA* self.window_len:, j], color='k', alpha=1, linewidth=3, label=f"True {label}")
+        # ax_.plot(self.true_data[-DELTA* self.observed_len:, j], color='k', alpha=1, linewidth=3, label=f"True {label}")
 
         # # Show updated figure
         # self.show_figure()
 
     def data_concat(self, true, pred) -> np.array:
         batch_size = true.shape[0]
-        window_len = true.shape[1]
-        future_len = pred.shape[1]
+        observed_len = true.shape[1]
+        forecast_len = pred.shape[1]
         decode_dim = true.shape[2]
         true = true.numpy()
         pred = pred.detach().numpy()
@@ -152,9 +152,9 @@ class Dashboard_v2:
         idx = 0
         if self.true_data is None:
             self.true_data = true[0]
-            self.pred_data = np.zeros((0, future_len, decode_dim))
+            self.pred_data = np.zeros((0, forecast_len, decode_dim))
 
-        # if self.predicted < future_len:
+        # if self.predicted < forecast_len:
         #     for batch in range(batch_size):
 
         for batch in range(idx, batch_size):
@@ -163,7 +163,7 @@ class Dashboard_v2:
 
             self.true_data = np.concatenate([self.true_data, true[batch, -1:]])
             self.pred_data = np.concatenate([self.pred_data, pred[batch : batch + 1]])
-            self.predicted = min(future_len, self.predicted + 1)
+            self.predicted = min(forecast_len, self.predicted + 1)
 
         return self.true_data, self.pred_data
 
@@ -198,7 +198,7 @@ class Dashboard_v2:
 #     def __init__(self, dataset):
 #         super(Dashboard).__init__()
 #         self.dataset = dataset
-#         self.seq_len = dataset.window_len
+#         self.seq_len = dataset.observed_len
 
 #         self.fig, self.ax = self.init_figure()
 
