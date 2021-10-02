@@ -125,10 +125,21 @@ venv.bak/
 .dmypy.json
 dmypy.json
 
-# Pyre type checker
-.pyre/
-data/
-models/pretrained/
+# Pretrained model
+*.pth
+
+# Config setting
+config.json
+
+# Log files
+*.log
+
+# Data Files
 *.csv
 *.pkl
-*.pth
+*.bat
+
+__pycache__
+
+# Upload sample files
+!sample.*
